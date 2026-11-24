@@ -7,6 +7,27 @@ import { extractorFor } from "../../src/extractors/registry.js";
 import { makeDocx, makePptx } from "../helpers/ooxml.js";
 import { mkTmp } from "../helpers/tmp.js";
 
+/** 글꼴을 내장하지 않고 미리 정의된 한글 CMap(UniKS-UCS2-H)을 쓰는 PDF. 한글(HWP)에서 내보낸 PDF에 흔하다 */
+function koreanCidPdf(text: string): Buffer {
+  const hex = Buffer.from(text, "utf16le").swap16().toString("hex").toUpperCase();
+  const content = `BT /F1 12 Tf 40 700 Td <${hex}> Tj ET`;
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type0 /BaseFont /HYGoThic-Medium /Encoding /UniKS-UCS2-H /DescendantFonts [6 0 R] >>",
+    "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /HYGoThic-Medium /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 1 >> /FontDescriptor 7 0 R >>",
+    "<< /Type /FontDescriptor /FontName /HYGoThic-Medium /Flags 6 /FontBBox [0 -148 1001 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 880 /StemV 93 >>",
+  ];
+  let out = "%PDF-1.4\n"; const offs: number[] = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const x = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("");
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}
+
 describe("extractors", () => {
   it("txt: utf-8", async () => {
     const d = await mkTmp(); const p = join(d, "a.txt");
@@ -19,6 +40,14 @@ describe("extractors", () => {
     // "한글" in CP949
     await writeFile(p, Buffer.from([0xc7, 0xd1, 0xb1, 0xdb]));
     expect(await extractorFor("txt")!.extract(p)).toMatchObject({ ok: true, text: "한글" });
+  });
+
+  it("pdf: Korean text with a predefined CMap and no embedded font (HWP export)", async () => {
+    const d = await mkTmp(); const p = join(d, "ks.pdf");
+    const text = "캡스톤 디자인 보고서: 이미지 분류 서비스 개발과 성능 개선 결과 정리 ".repeat(2);
+    await writeFile(p, koreanCidPdf(text));
+    const r = await extractorFor("pdf")!.extract(p);
+    expect(r.ok && r.text).toContain("캡스톤 디자인 보고서");
   });
 
   it("docx", async () => {

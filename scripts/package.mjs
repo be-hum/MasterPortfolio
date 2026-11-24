@@ -6,7 +6,7 @@
 // 필요한 도구: npm, curl, tar, unzip, zip
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,9 +48,31 @@ function stageApp(target) {
   mkdirSync(app, { recursive: true });
   for (const f of ["dist", "data", "package.json", "package-lock.json"]) cpSync(join(ROOT, f), join(app, f), { recursive: true });
   log(`운영 의존성 설치(${t.npmOs}/${t.npmCpu})`);
-  run("npm", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", `--os=${t.npmOs}`, `--cpu=${t.npmCpu}`], app);
+  // --omit=optional: pdfjs-dist의 @napi-rs/canvas(렌더링용 네이티브, 약 39MB)는 텍스트 추출에 필요 없다
+  run("npm", ["ci", "--omit=dev", "--omit=optional", "--ignore-scripts", "--no-audit", "--no-fund", `--os=${t.npmOs}`, `--cpu=${t.npmCpu}`], app);
+  pruneApp(join(app, "node_modules"));
   return app;
 }
+
+/** 실행에 필요 없는 파일을 지운다: 소스맵·타입 선언·@types, pdfjs의 쓰지 않는 빌드(앱은 legacy/build/pdf.mjs + pdf.worker.mjs만 씀) */
+function pruneApp(nm) {
+  const before = dirSize(nm);
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(map|d\.ts|d\.mts|d\.cts|tsbuildinfo)$/.test(e.name) || /^(README|CHANGELOG|HISTORY)(\.md)?$/i.test(e.name)) rmSync(p);
+    }
+  };
+  walk(nm);
+  rmSync(join(nm, "@types"), { recursive: true, force: true });
+  const pdfjs = join(nm, "pdfjs-dist");
+  for (const x of ["build", "web", "types", "image_decoders", "legacy/web", "legacy/image_decoders", "legacy/webpack.mjs"]) rmSync(join(pdfjs, x), { recursive: true, force: true });
+  for (const f of readdirSync(join(pdfjs, "legacy", "build"))) if (!["pdf.mjs", "pdf.worker.mjs"].includes(f)) rmSync(join(pdfjs, "legacy", "build", f));
+  console.log(`  정리: ${mb(before)} → ${mb(dirSize(nm))}`);
+}
+const dirSize = (d) => readdirSync(d, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? dirSize(join(d, e.name)) : e.isFile() ? statSync(join(d, e.name)).size : 0), 0);
+const mb = (b) => `${(b / 1048576).toFixed(1)}MB`;
 
 function extractRuntime(target, archivePath, dest) {
   const tmp = join(REL, "stage", `rt-${target}`);
@@ -59,8 +81,8 @@ function extractRuntime(target, archivePath, dest) {
   else run("tar", ["-xzf", archivePath, "-C", tmp]);
   const [inner] = readdirSync(tmp);
   renameSync(join(tmp, inner), dest);
-  // 문서·헤더는 실행에 필요 없다
-  for (const x of ["include", "share", "CHANGELOG.md", "README.md"]) rmSync(join(dest, x), { recursive: true, force: true });
+  // 문서·헤더·corepack은 실행에 필요 없다(npm은 Claude 연결 어댑터를 npx로 받을 때 필요)
+  for (const x of ["include", "share", "CHANGELOG.md", "README.md", "corepack", "corepack.cmd", "node_modules/corepack", "bin/corepack", "lib/node_modules/corepack"]) rmSync(join(dest, x), { recursive: true, force: true });
 }
 
 function build(target, sums) {
