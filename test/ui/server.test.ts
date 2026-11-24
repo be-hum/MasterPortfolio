@@ -1,0 +1,226 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { request } from "node:http";
+import { join, resolve } from "node:path";
+import { mkTmp } from "../helpers/tmp.js";
+import { seedCards } from "../helpers/cards.js";
+import { runGroup } from "../../src/commands/group.js";
+import { runUi } from "../../src/commands/ui.js";
+import { startUiServer } from "../../src/ui/server.js";
+import { listExperiences } from "../../src/store/experiences.js";
+import { loadState } from "../../src/store/state.js";
+
+const TOKEN = "t".repeat(64);
+const dirs: string[] = [];
+const closers: (() => Promise<void>)[] = [];
+
+async function setup(cliPath = "unused.js", onShutdown?: () => void) {
+  const out = await mkTmp("mp-out-"); dirs.push(out); process.env.MP_OUTPUT_DIR = out;
+  await seedCards(out, [{ title: "보고서" }, { title: "발표" }], "group-one");
+  await runGroup({ yes: true });
+  const srv = await startUiServer({ out, token: TOKEN, cliPath, html: (t) => `<!doctype html><title>x</title>${t}`, onShutdown });
+  closers.push(srv.close);
+  const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = { "x-mp-token": TOKEN }) => {
+    const r = await fetch(`http://127.0.0.1:${srv.port}${path}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body) });
+    const text = await r.text();
+    let json: any = null; try { json = JSON.parse(text); } catch { /* not json */ }
+    return { status: r.status, json, text, headers: r.headers };
+  };
+  const exps = async () => { const { state } = await loadState(out); return listExperiences(out, state); };
+  return { out, srv, call, exps };
+}
+
+describe("mp ui server (11.5)", () => {
+  beforeEach(() => { vi.spyOn(console, "log").mockImplementation(() => {}); });
+  afterEach(async () => {
+    vi.restoreAllMocks(); delete process.env.MP_OUTPUT_DIR;
+    await Promise.all(closers.splice(0).map((c) => c()));
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  it("checks token and Host; no CORS headers", async () => {
+    const { srv, call } = await setup();
+    expect((await call("GET", "/api/state", undefined, {})).status).toBe(401);
+    expect((await call("GET", "/api/state", undefined, { "x-mp-token": "short" })).status).toBe(401);
+    const bad = await new Promise<number>((ok, fail) => {
+      const r = request({ host: "127.0.0.1", port: srv.port, path: "/api/state", headers: { host: "evil.com", "x-mp-token": TOKEN } }, (res) => { res.resume(); ok(res.statusCode!); });
+      r.on("error", fail); r.end();
+    });
+    expect(bad).toBe(403);
+    const good = await call("GET", "/api/state");
+    expect(good.status).toBe(200);
+    expect(good.headers.get("access-control-allow-origin")).toBeNull();
+    expect(good.json.experiences).toHaveLength(1);
+    expect(good.json.experiences[0]).toMatchObject({ review: "pending", title: "하나의 경험", pending_apply: false, edited: false, keywords: ["역분석", "입력 복원"], outcome_keywords: ["키 복원"] });
+    expect(good.json.job).toBeNull();
+  });
+
+  it("serves the page only with the right t", async () => {
+    const { call } = await setup();
+    expect((await call("GET", "/?t=bad", undefined, {})).status).toBe(401);
+    expect((await call("GET", "/", undefined, {})).status).toBe(401);
+    const ok = await call("GET", `/?t=${TOKEN}`, undefined, {});
+    expect(ok.status).toBe(200);
+    expect(ok.text).toContain(TOKEN);
+    expect(ok.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("decide, answer (masked), edit (clamped, strict)", async () => {
+    const { call, exps } = await setup();
+    const rel = (await exps())[0].rel;
+    expect((await call("POST", "/api/decide", { rels: [rel], decision: "adopted" })).status).toBe(200);
+    expect((await exps())[0].fm.review).toBe("adopted");
+    expect((await call("POST", "/api/decide", { rels: ["experiences/none.md"], decision: "held" })).status).toBe(404);
+    expect((await call("POST", "/api/decide", { rels: [rel], decision: "bogus" })).status).toBe(400);
+
+    const [e0] = await exps();
+    const qid = e0.fm.questions[0].id;
+    expect((await call("POST", "/api/answer", { rel, qid: "nope", a: "x" })).status).toBe(404);
+    expect((await call("POST", "/api/answer", { rel, qid, a: "팀장 010-1234-5678" })).status).toBe(200);
+    const [e1] = await exps();
+    expect(e1.fm.questions[0].a).toBe("팀장 [전화번호]");
+    expect(e1.fm.pending_apply).toBe(true);
+
+    const long = "가".repeat(20);
+    expect((await call("POST", "/api/edit", { rel, fields: { contribution: "AI 주도", keywords: [long, "b", "c", "d"], team_size: 3 } })).status).toBe(200);
+    const [e2] = await exps();
+    expect(e2.fm.contribution).toBe("AI 주도");
+    expect(e2.fm.keywords).toEqual(["가".repeat(18), "b", "c"]);
+    expect(e2.fm.team_size).toBe(3);
+    expect((await call("POST", "/api/edit", { rel, fields: { review: "adopted" } })).status).toBe(400);
+    expect((await call("POST", "/api/edit", { rel, fields: { contribution: "없는값" } })).status).toBe(400);
+    expect((await exps())[0].fm.review).toBe("adopted");
+  });
+
+  it("409 for externally edited cards, until accept-edit", async () => {
+    const { out, call, exps } = await setup();
+    const rel = (await exps())[0].rel;
+    const path = join(out, rel);
+    const edited = (await readFile(path, "utf8")) + "\n내 메모\n";
+    await writeFile(path, edited);
+    for (const [p, b] of [["/api/decide", { rels: [rel], decision: "adopted" }], ["/api/edit", { rel, fields: { title: "새 제목" } }], ["/api/answer", { rel, qid: "q1", a: "x" }]] as const) {
+      const r = await call("POST", p, b);
+      expect(r.status, p).toBe(409);
+    }
+    expect(await readFile(path, "utf8")).toBe(edited);
+    expect((await call("GET", "/api/state")).json.experiences[0].edited).toBe(true);
+    expect((await call("POST", "/api/accept-edit", { rel })).status).toBe(200);
+    expect((await call("POST", "/api/decide", { rels: [rel], decision: "held" })).status).toBe(200);
+    expect((await exps())[0].fm.review).toBe("held");
+  });
+
+  it("decide returns only the edited ones as 409 and saves the rest", async () => {
+    const { out, call, exps } = await setup();
+    const [a] = await exps();
+    // 두 번째 경험 카드를 복제해 만든다
+    const text = await readFile(join(out, a.rel), "utf8");
+    const second = "experiences/zz-copy.md";
+    await writeFile(join(out, second), text);
+    const { state } = await loadState(out);
+    const { acceptExperienceEdit } = await import("../../src/store/experiences.js");
+    const { saveState } = await import("../../src/store/state.js");
+    const all = await listExperiences(out, state);
+    await acceptExperienceEdit(out, state, all.find((x) => x.rel === second)!);
+    await saveState(out, state);
+    await writeFile(join(out, a.rel), text + "\n편집\n");
+    const r = await call("POST", "/api/decide", { rels: [a.rel, second], decision: "excluded" });
+    expect(r.status).toBe(409);
+    expect(r.json.edited).toEqual([a.rel]);
+    expect(r.json.saved).toEqual([second]);
+    expect((await exps()).find((x) => x.rel === second)!.fm.review).toBe("excluded");
+  });
+
+  it("500 with the corrupt-state message", async () => {
+    const { out, call } = await setup();
+    await writeFile(join(out, ".mp", "state.json"), "{broken");
+    const r = await call("GET", "/api/state");
+    expect(r.status).toBe(500);
+    expect(r.json.error).toContain("state.json 손상");
+  });
+
+  it("/files rejects traversal and non-existent, serves existing cards as text/plain", async () => {
+    const { srv, call, exps, out } = await setup();
+    const raw = (path: string) => new Promise<number>((ok, fail) => {
+      const r = request({ host: "127.0.0.1", port: srv.port, path, headers: { "x-mp-token": TOKEN } }, (res) => { res.resume(); ok(res.statusCode!); });
+      r.on("error", fail); r.end();
+    });
+    await mkdir(join(out, ".mp"), { recursive: true }); await writeFile(join(out, ".mp", "x.md"), "secret"); await writeFile(join(out, "master.md"), "m");
+    for (const p of ["/files/../.mp/config.json", "/files/%2e%2e/x.md", "/files/files/none.md", "/files/../.mp/x.md", "/files/..%2fmaster.md", "/files/%2e%2e%2f.mp%2fx.md", "/files/files/card-0.txt", "/files/%00.md", "/files/%zz"]) {
+      expect(await raw(p), p).toBe(404);
+    }
+    const f = await call("GET", "/files/files/card-0.md");
+    expect(f.status).toBe(200);
+    expect(f.headers.get("content-type")).toContain("text/plain");
+    expect((await call("GET", `/files/${(await exps())[0].rel}`)).status).toBe(200);
+    expect((await call("GET", "/files/files/card-0.md", undefined, {})).status).toBe(401);
+  });
+
+  it("limits body to 1MB (413) and rejects non-JSON (400)", async () => {
+    const { call } = await setup();
+    expect((await call("POST", "/api/decide", "x".repeat(1024 * 1024 + 10))).status).toBe(413);
+    expect((await call("POST", "/api/decide", "{nope")).status).toBe(400);
+    expect((await call("POST", "/api/decide", "[1]")).status).toBe(400);
+  });
+
+  it("shutdown calls onShutdown; scan and group are allowed job kinds", async () => {
+    let down = 0;
+    const dir = await mkTmp("mp-stub-"); dirs.push(dir);
+    const stub = join(dir, "stub.mjs");
+    await writeFile(stub, `console.log("args " + process.argv.slice(2).join(" "));`);
+    const { call } = await setup(stub, () => { down++; });
+    for (const kind of ["scan", "group"]) {
+      expect((await call("POST", "/api/job", { kind })).status).toBe(200);
+      let job: any;
+      for (let i = 0; i < 100; i++) { job = (await call("GET", "/api/job")).json.job; if (!job.running) break; await new Promise((r) => setTimeout(r, 30)); }
+      expect(job.lines.join(" ")).toContain(`args ${kind} --yes`);
+    }
+    expect((await call("POST", "/api/shutdown", {}, {})).status).toBe(401);
+    expect((await call("POST", "/api/shutdown", {})).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(down).toBe(1);
+  });
+
+  it("job: runs a child, keeps the last 200 lines, and rejects a second start with 409", async () => {
+    const dir = await mkTmp("mp-stub-"); dirs.push(dir);
+    const stub = join(dir, "stub.mjs");
+    await writeFile(stub, `for (let i=0;i<250;i++) console.log("line "+i); console.error("err "+process.argv.slice(2).join(" ")+" "+process.env.MP_OUTPUT_DIR); setTimeout(()=>process.exit(3), 400);`);
+    const { call, out } = await setup(stub);
+    const a = await call("POST", "/api/job", { kind: "keywords" });
+    expect(a.status).toBe(200);
+    expect(a.json.job.running).toBe(true);
+    expect((await call("POST", "/api/job", { kind: "master" })).status).toBe(409);
+    expect((await call("POST", "/api/job", { kind: "rm -rf" })).status).toBe(409);
+    const blocked = await call("POST", "/api/decide", { rels: [], decision: "held" });
+    expect(blocked.status).toBe(409);
+    expect(blocked.json.error).toContain("작업 실행 중");
+    let job: any;
+    for (let i = 0; i < 100; i++) { job = (await call("GET", "/api/job")).json.job; if (!job.running) break; await new Promise((r) => setTimeout(r, 50)); }
+    expect(job.running).toBe(false);
+    expect(job.code).toBe(3);
+    expect(job.lines.length).toBeLessThanOrEqual(200);
+    expect(job.lines.some((l: string) => l.includes(`keywords --yes ${out}`))).toBe(true);
+    expect((await call("POST", "/api/job", { kind: "bogus" })).status).toBe(400);
+  });
+
+  it("job master (real CLI via tsx) writes master.html", async () => {
+    const { call, out } = await setup(resolve("src/cli.ts"));
+    const loader = new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
+    const prev = process.env.NODE_OPTIONS;
+    process.env.NODE_OPTIONS = `--import ${loader}`;
+    try {
+      expect((await call("POST", "/api/job", { kind: "master" })).status).toBe(200);
+      let job: any;
+      for (let i = 0; i < 200; i++) { job = (await call("GET", "/api/job")).json.job; if (!job.running) break; await new Promise((r) => setTimeout(r, 100)); }
+      expect(job.code, job.lines.join("\n")).toBe(0);
+      expect((await readFile(join(out, "master.html"), "utf8")).length).toBeGreaterThan(100);
+    } finally { if (prev === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = prev; }
+  });
+
+  it("runUi prints the URL and serves with an injected cliPath", async () => {
+    const out = await mkTmp("mp-out-"); dirs.push(out); process.env.MP_OUTPUT_DIR = out;
+    const r = await runUi({ open: false, cliPath: "unused.js" });
+    closers.push(r.close!);
+    expect(r.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?t=[0-9a-f]{64}$/);
+    expect((await fetch(r.url!)).status).toBe(200);
+  });
+});

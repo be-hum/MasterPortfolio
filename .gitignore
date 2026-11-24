@@ -1,0 +1,9 @@
+spikes/**/samples/
+spikes/**/out/
+spikes/**/node_modules/
+spikes/**/.venv/
+node_modules/
+dist/
+release/
+.superpowers/
+.claude/handoffs/

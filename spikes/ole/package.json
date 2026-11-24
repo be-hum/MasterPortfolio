@@ -1,0 +1,1 @@
+{"name":"ole-spike","private":true,"type":"module","dependencies":{"cfb":"^1.2.2","fast-levenshtein":"^3.0.0","hwp.js":"^0.0.3","jszip":"^3.10.2","word-extractor":"^1.0.4"}}

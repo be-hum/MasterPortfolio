@@ -1,0 +1,40 @@
+{
+  "name": "masterportfolio",
+  "version": "0.1.0",
+  "type": "module",
+  "files": [
+    "dist",
+    "data"
+  ],
+  "bin": {
+    "mp": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/cli.ts",
+    "prepublishOnly": "npm run build",
+    "package": "node scripts/package.mjs"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "2.9.1",
+    "@inquirer/prompts": "^8.8.1",
+    "commander": "^15.1.0",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^6.5.438",
+    "yaml": "^2.9.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "pdf-lib": "^1.17.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.1"
+  }
+}
