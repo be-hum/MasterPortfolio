@@ -1,7 +1,7 @@
 @echo off
 rem MasterPortfolio launcher (Windows). Double-click to start.
+rem No "chcp 65001": in the classic console it breaks Korean IME (han/eng toggle). Node writes Unicode to the console regardless of code page.
 setlocal
-chcp 65001 >nul
 set "HERE=%~dp0"
 set "PATH=%HERE%runtime;%PATH%"
 title MasterPortfolio
