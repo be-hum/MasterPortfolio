@@ -8,6 +8,8 @@
  * - override()로 단계 이름을 바꿀 수 있다(스캔 시작 때 이전 카드 판정을 "judge-pending"으로 따로 셈).
  */
 export const PROGRESS_PREFIX = "@@progress ";
+export const SUMMARY_PREFIX = "@@summary ";
+const enabled = () => process.env.MP_PROGRESS === "1";
 
 let label: string | null = null;
 let override: string | null = null;
@@ -31,13 +33,24 @@ export const progress = {
     const ev: ProgressEvent = { stage: label, done: carried + done, total: carried + total };
     process.stdout.write(PROGRESS_PREFIX + JSON.stringify(ev) + "\n");
   },
+  /** LLM 묶음이 아닌 로컬 단계(파일 찾기·확인). total 0이면 개수만(전체 미정) */
+  local(stage: string, done: number, total: number): void {
+    if (!enabled()) return;
+    process.stdout.write(PROGRESS_PREFIX + JSON.stringify({ stage, done, total } satisfies ProgressEvent) + "\n");
+  },
+  /** 작업 결과 한 줄 요약(화면 알림·작업 바) */
+  summary(text: string): void {
+    if (!enabled()) return;
+    process.stdout.write(SUMMARY_PREFIX + text.replace(/\r?\n/g, " ") + "\n");
+  },
   /** 테스트용 초기화 */
   reset(): void { label = null; override = null; carried = 0; lastDone = 0; lastTotal = 0; },
 };
 
 /** 작업 종류별 단계 순서와 무게(전체 % 계산). 스캔은 추출이 가장 오래 걸린다 */
 export const JOB_PLANS: Record<string, [string, number][]> = {
-  scan: [["scope", 0.05], ["judge-pending", 0.1], ["triage", 0.15], ["extract", 0.5], ["judge", 0.2]],
+  // 실제 순서: 파일 찾기 → 폴더 범위 → (범위 정리로 제외가 생기면 다시 찾기) → 파일 확인(해시) → 이전 카드 판정 → 선별 → 추출 → 판정
+  scan: [["walk", 0.04], ["scope", 0.05], ["hash", 0.06], ["judge-pending", 0.08], ["triage", 0.12], ["extract", 0.45], ["judge", 0.2]],
   group: [["group", 1]],
   apply: [["review", 1]],
   keywords: [["keywords", 1]],

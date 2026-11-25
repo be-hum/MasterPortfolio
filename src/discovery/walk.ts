@@ -142,6 +142,8 @@ export type WalkOptions = {
   home?: string; platform?: NodeJS.Platform; excludeRoots?: string[];
   /** 폴더 범위 판단(5.5): 가장 가까운 상위(자기 포함) 판단이 exclude인 폴더는 내려가지 않는다(하위 include 쪽으로만 내려감). */
   scope?: ScopeDecisions;
+  /** 파일 하나를 찾을 때마다(진행률 표시용) */
+  onFile?: () => void;
 };
 
 export async function walk(root: string, opts: WalkOptions = {}) {
@@ -183,6 +185,7 @@ export async function walk(root: string, opts: WalkOptions = {}) {
         if (scopeExcluded) continue;
         if (isGeneratedFileName(d.name) || split.has(d.name)) { generated.push(p); continue; }
         entries.push({ kind: "file", path: p, size: r.stat.size, mtimeMs: r.stat.mtimeMs });
+        opts.onFile?.();
       } else if (r.kind === "error") {
         if (!scopeExcluded) inaccessible.push(p);
       }

@@ -214,7 +214,7 @@ details summary{cursor:pointer;font-size:12.5px;color:var(--ink-2)}
 .jb-left>strong,.jb-left .linklike{white-space:nowrap;flex:none}
 .jb-left strong{font-variant-numeric:tabular-nums}
 .jb-line{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-3);font:12px ui-monospace,monospace}
-.jb-last{font-size:12px}
+.jb-last{font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .jb-last.ok{color:var(--ok)}.jb-last.err{color:var(--danger)}
 .jb-right{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .jb-bar{display:inline-block;width:160px;height:8px;border-radius:99px;background:var(--surface-2,#e9ecf1);overflow:hidden;vertical-align:middle;flex:none}
@@ -279,9 +279,10 @@ var CONTRIB_HELP = {
   "개념 해석": "본인은 개념·설계 해석을 맡고 구현은 AI·타인이 수행"
 };
 var FIELD_LABEL = { role: "역할", period: "기간", contribution: "수행 방식", org: "소속", team_size: "팀 규모", skills: "기술", metrics: "성과", title: "제목", category: "분류" };
-var STAGE_LABEL = { scope: "폴더 범위", "judge-pending": "이전 카드 판정", triage: "선별", extract: "카드 추출", judge: "판정", group: "경험 묶기", review: "반영", keywords: "키워드" };
+var STAGE_LABEL = { walk: "파일 찾기", hash: "파일 확인", scope: "폴더 범위", "judge-pending": "이전 카드 판정", triage: "선별", extract: "카드 추출", judge: "판정", group: "경험 묶기", review: "반영", keywords: "키워드" };
 function progressText(p) {
-  var parts = [(STAGE_LABEL[p.stage] || p.stage) + " " + p.done + "/" + p.total];
+  var num = function (n) { return Number(n).toLocaleString("ko-KR"); };
+  var parts = [(STAGE_LABEL[p.stage] || p.stage) + " " + (p.total ? num(p.done) + "/" + num(p.total) : num(p.done) + "개")];
   if (p.overall !== null && p.overall !== undefined) parts.push("전체 " + Math.round(p.overall * 100) + "%");
   if (p.etaSec !== null && p.etaSec !== undefined) parts.push(p.etaSec < 60 ? "1분 안에 끝남" : "약 " + Math.round(p.etaSec / 60) + "분 남음");
   else if (p.overall !== null && p.overall !== undefined && p.overall < 1) parts.push("남은 시간 계산 중");
@@ -892,7 +893,7 @@ function tick() {
     S.polling = false;
     if (S.job) {
       var okd = S.job.code === 0;
-      toast(JOB_LABEL[S.job.kind] + (okd ? " 완료" : " 실패(코드 " + S.job.code + ") — 로그를 확인하세요"), okd ? null : "err");
+      toast(JOB_LABEL[S.job.kind] + (okd ? " 완료" + (S.job.summary ? " — " + S.job.summary : "") : " 실패(코드 " + S.job.code + ") — " + (S.job.summary || "로그를 확인하세요")), okd ? null : "err");
       if (!okd) S.showLog = true;
     }
     load();
@@ -924,7 +925,8 @@ function renderJob() {
     }
   } else {
     left.appendChild(el("span", {}, ["반영 대기 ", el("strong", { text: String(pend) }), "개"]));
-    if (j) left.appendChild(el("span", { class: "jb-last " + (j.code === 0 ? "ok" : "err"), text: "최근: " + (JOB_LABEL[j.kind] || j.kind) + (j.code === 0 ? " 완료" : " 실패(코드 " + j.code + ")") }));
+    if (j) left.appendChild(el("span", { class: "jb-last " + (j.code === 0 ? "ok" : "err"), title: j.summary || "",
+      text: "최근: " + (JOB_LABEL[j.kind] || j.kind) + (j.code === 0 ? " 완료" : " 실패(코드 " + j.code + ")") + (j.summary ? " — " + j.summary : "") }));
   }
   if (j && j.lines.length) left.appendChild(el("button", { type: "button", class: "linklike", "data-k": "log", "aria-expanded": String(S.showLog),
     onclick: function () { S.showLog = !S.showLog; renderJob(); }, text: S.showLog ? "로그 닫기" : "로그 보기" }));

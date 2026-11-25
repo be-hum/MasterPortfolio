@@ -189,10 +189,23 @@ describe("mp ui server (11.5)", () => {
     let job: any;
     for (let i = 0; i < 100; i++) { job = (await call("GET", "/api/job")).json.job; if (job.progress || !job.running) break; await new Promise((r) => setTimeout(r, 30)); }
     expect(job.progress).toMatchObject({ stage: "extract", done: 3, total: 6 });
-    expect(job.progress.overall).toBeCloseTo(0.55);
+    expect(job.progress.overall).toBeCloseTo(0.575);
     for (let i = 0; i < 100; i++) { job = (await call("GET", "/api/job")).json.job; if (!job.running) break; await new Promise((r) => setTimeout(r, 30)); }
     expect(job.code).toBe(0);
     expect(job.lines).toEqual(["시작"]);
+    expect(job.summary).toBe("시작"); // @@summary가 없으면 마지막 표준 출력 줄
+  });
+
+  it("job summary: @@summary wins over the last line; overall % never goes backwards", async () => {
+    const dir = await mkTmp("mp-stub-"); dirs.push(dir);
+    const stub = join(dir, "stub.mjs");
+    await writeFile(stub, `console.log('@@progress {"stage":"hash","done":10,"total":10}'); setTimeout(() => { console.log('@@progress {"stage":"walk","done":400,"total":0}'); console.log("@@summary 새로 분석할 자료 없음 · 크기 초과 1개"); console.log("끝 줄"); setTimeout(() => process.exit(0), 200); }, 200);`);
+    const { call } = await setup(stub);
+    await call("POST", "/api/job", { kind: "scan" });
+    let job: any, seen: number[] = [];
+    for (let i = 0; i < 100; i++) { job = (await call("GET", "/api/job")).json.job; if (job.progress?.overall != null) seen.push(job.progress.overall); if (!job.running) break; await new Promise((r) => setTimeout(r, 25)); }
+    for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+    expect(job.summary).toBe("새로 분석할 자료 없음 · 크기 초과 1개");
   });
 
   it("job: runs a child, keeps the last 200 lines, and rejects a second start with 409", async () => {

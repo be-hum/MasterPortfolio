@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import { progress } from "../core/progress.js";
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { confirm as inqConfirm, expand } from "@inquirer/prompts";
@@ -121,7 +122,10 @@ export function scopeStopReason(stop: Stop, runner: StageRunner, agent: string, 
 export async function walkScanFolders(config: Config, out: string) {
   const excludeRoots = [resolve(out)];
   const walks: { root: string; result: Awaited<ReturnType<typeof walk>> }[] = [];
-  for (const root of config.scanFolders) walks.push({ root, result: await walk(root, { excludeRoots, scope: config.scope.decisions }) });
+  let found = 0;
+  const onFile = () => { if (++found % 200 === 0) progress.local("walk", found, 0); };
+  for (const root of config.scanFolders) walks.push({ root, result: await walk(root, { excludeRoots, scope: config.scope.decisions, onFile }) });
+  progress.local("walk", found, found);
   return walks;
 }
 

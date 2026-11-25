@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { runScan } from "../../src/commands/scan.js";
+import { runScan, scanSummary } from "../../src/commands/scan.js";
 import { runInit, normalizeFolderInput } from "../../src/commands/init.js";
 import { homedir } from "node:os";
 import { main } from "../../src/cli.js";
@@ -77,7 +77,7 @@ describe("runScan", () => {
     expect(prompts).not.toContain("메모.txt");
   });
 
-  it("reports stage progress lines for the UI when MP_PROGRESS=1 (scope → triage → extract → judge, ending done=total)", async () => {
+  it("reports stage progress lines for the UI when MP_PROGRESS=1 (walk → scope → hash → triage → extract → judge, ending done=total)", async () => {
     await setup("ok");
     process.env.MP_PROGRESS = "1";
     const lines: string[] = [];
@@ -89,8 +89,15 @@ describe("runScan", () => {
     try { expect((await runScan({ yes: true })).code).toBe(0); } finally { delete process.env.MP_PROGRESS; }
     const evs = lines.map((l) => JSON.parse(l.slice("@@progress ".length)));
     const stages = [...new Set(evs.map((e) => e.stage))];
-    expect(stages).toEqual(["scope", "triage", "extract", "judge"]);
+    expect(stages).toEqual(["walk", "scope", "hash", "triage", "extract", "judge"]);
     for (const st of stages) { const last = evs.filter((e) => e.stage === st).at(-1); expect(last.done).toBe(last.total); }
+  });
+
+  it("scanSummary says when nothing new was analysed, and lists what was skipped", () => {
+    const base = { startedAt: "x", created: [], changed: [], skippedSensitive: [], skippedLarge: [{ path: "a.pdf", size: 5e7 }], skippedLong: [], extractFailed: [], analysisFailed: [], inaccessible: [], unsupported: 0, stoppedReason: null, judgement: { judged: 0, unjudged: 0, skippedEdited: [] } };
+    expect(scanSummary(base)).toBe("새로 분석할 자료 없음 · 크기 초과 1개");
+    expect(scanSummary({ ...base, created: ["files/a.md", "files/b.md"], judgement: { judged: 2, unjudged: 0, skippedEdited: [] }, skippedLarge: [], skippedIrrelevant: ["x"] }))
+      .toBe("새 카드 2개 · 판정 2개 · 무관해 보여 제외 1개");
   });
 
   it("second scan sends nothing new", async () => {

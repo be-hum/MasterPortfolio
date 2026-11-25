@@ -23,6 +23,8 @@ export type PrefilterResult = {
 };
 
 export type PrefilterOptions = {
+  /** 진행률 표시용: 확인한 항목 수 / 전체 */
+  onProgress?: (done: number, total: number) => void;
   /** `mp scan --retriage`: skipped_irrelevant 파일을 다시 후보로 넣는다(9.7 E) */
   retriage?: boolean;
 };
@@ -36,7 +38,9 @@ export async function prefilter(entries: WalkEntry[], state: State, limits: Conf
     if (f.status === "done" && f.card && !cardByHash.has(f.source_hash)) cardByHash.set(f.source_hash, f.card);
   }
   const irrelevantHashes = new Set(opts.retriage ? [] : Object.values(state.files).filter((f) => f.status === "skipped_irrelevant").map((f) => f.source_hash));
+  let seen = 0;
   for (const e of entries) {
+    if (++seen % 50 === 0) opts.onProgress?.(seen, entries.length);
     if (e.kind === "repo") { res.unsupported++; continue; }
     const format = SUPPORTED_EXT[extname(e.path).toLowerCase()];
     if (!format) { res.unsupported++; continue; }
@@ -63,5 +67,6 @@ export async function prefilter(entries: WalkEntry[], state: State, limits: Conf
     byHash.set(hash, c);
     res.candidates.push(c);
   }
+  opts.onProgress?.(entries.length, entries.length);
   return res;
 }

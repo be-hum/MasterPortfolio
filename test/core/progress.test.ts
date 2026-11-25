@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { etaSeconds, overallProgress, progress, PROGRESS_PREFIX } from "../../src/core/progress.js";
+import { etaSeconds, overallProgress, progress, PROGRESS_PREFIX, SUMMARY_PREFIX } from "../../src/core/progress.js";
 
 describe("progress", () => {
   afterEach(() => { progress.reset(); delete process.env.MP_PROGRESS; vi.restoreAllMocks(); });
@@ -38,12 +38,23 @@ describe("progress", () => {
   });
 
   it("overall uses stage order and weights; earlier (skipped) stages count as done", () => {
-    expect(overallProgress("scan", { stage: "triage", done: 0, total: 2 })).toBeCloseTo(0.15);
-    expect(overallProgress("scan", { stage: "extract", done: 3, total: 6 })).toBeCloseTo(0.3 + 0.25);
+    expect(overallProgress("scan", { stage: "walk", done: 500, total: 0 })).toBeCloseTo(0);
+    expect(overallProgress("scan", { stage: "triage", done: 0, total: 2 })).toBeCloseTo(0.23);
+    expect(overallProgress("scan", { stage: "extract", done: 3, total: 6 })).toBeCloseTo(0.35 + 0.225);
     expect(overallProgress("scan", { stage: "judge", done: 2, total: 2 })).toBeCloseTo(1);
     expect(overallProgress("apply", { stage: "review", done: 1, total: 4 })).toBeCloseTo(0.25);
     expect(overallProgress("scan", { stage: "unknown", done: 1, total: 2 })).toBeNull();
     expect(overallProgress("master", { stage: "extract", done: 1, total: 2 })).toBeNull();
+  });
+
+  it("local stages and summary print only with MP_PROGRESS=1", () => {
+    const out: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation(((t: string) => { out.push(t); return true; }) as never);
+    progress.local("walk", 200, 0); progress.summary("x");
+    expect(out).toEqual([]);
+    process.env.MP_PROGRESS = "1";
+    progress.local("hash", 50, 120); progress.summary("새 카드 3개\n· 끝");
+    expect(out).toEqual([`${PROGRESS_PREFIX}{"stage":"hash","done":50,"total":120}\n`, `${SUMMARY_PREFIX}새 카드 3개 · 끝\n`]);
   });
 
   it("eta only after 15% and 20s", () => {

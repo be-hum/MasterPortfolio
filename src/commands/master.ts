@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import { progress } from "../core/progress.js";
 import { join } from "node:path";
 import { resolveOutputDir } from "../core/paths.js";
 import { adoptedOnly, buildUiState, loadFileTitles } from "../ui/model.js";
@@ -20,5 +21,6 @@ export async function runMaster(): Promise<{ code: number; count: number; path: 
   await writeFile(htmlPath, renderApp({ mode: "static", data: adoptedOnly(buildUiState(exps, titles)), generatedAt: isoNow().slice(0, 16).replace("T", " ") }));
   const count = exps.filter((e) => e.fm.review === "adopted").length;
   console.log(`master.md·master.html을 만들었습니다(채택 경험 ${count}개):\n- ${path}\n- ${htmlPath} (브라우저로 열기)`);
+  progress.summary(`채택 경험 ${count}개로 master.md·master.html을 만들었습니다`);
   return { code: 0, count, path, htmlPath };
 }
