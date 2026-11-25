@@ -236,10 +236,11 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
         output: typeof b.output === "string" ? b.output : "",
       };
       try {
-        const r = await (sd.create ?? createSetupConfig)(input);
+        const r = await (sd.create ?? createSetupConfig)(input, { adoptExisting: b.adopt === true });
         out = r.output;
         return send(res, 200, { ok: true, output: r.output });
       } catch (e) {
+        if (e instanceof SetupError && e.existing) throw new HttpError(409, e.errors[0], { errors: e.errors, existing: e.existing });
         if (e instanceof SetupError) throw new HttpError(400, e.errors[0] ?? "설정 값이 올바르지 않습니다.", { errors: e.errors });
         throw e;
       }

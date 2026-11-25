@@ -54,6 +54,23 @@ describe("setup mode (11.6)", () => {
     expect(r.json.defaultOutput).toBe("/out/default");
   });
 
+  it("an output folder that already has results is not overwritten: 409 existing, then adopt", async () => {
+    const scan = await tmp(), out = join(await tmp(), "mp");
+    await mkdir(join(out, ".mp"), { recursive: true });
+    const { defaultConfig } = await import("../../src/config/config.js");
+    const old = defaultConfig({ university: { input: "", keywords: [] }, scanFolders: [scan], agent: "claude" }); old.budget.planScale = 20;
+    await saveConfig(out, old);
+    const { call } = await boot(null);
+    const r1 = await call("POST", "/api/setup", { university: "", keywords: [], folders: [scan], planScale: 1, output: out });
+    expect(r1.status).toBe(409);
+    expect(r1.json.existing).toBe(out);
+    expect((await call("GET", "/api/state")).json.setup).toBe(true);
+    const r2 = await call("POST", "/api/setup", { university: "", keywords: [], folders: [], planScale: 1, output: out, adopt: true });
+    expect(r2.status).toBe(200);
+    expect((await loadConfig(out)).budget.planScale).toBe(20);
+    expect((await call("GET", "/api/state")).json.setup).toBeUndefined();
+  });
+
   it("setup success switches to normal mode; second setup is 409; invalid is 400", async () => {
     const scan = await tmp(), out = join(await tmp(), "결과");
     const { call } = await boot(null);

@@ -8,7 +8,8 @@ const run = promisify(execFile);
 
 async function ps(cmd: string): Promise<string | null> {
   try {
-    const { stdout } = await run("powershell", ["-NoProfile", "-NonInteractive", "-Command", cmd], { windowsHide: true, timeout: 10_000 });
+    // PowerShell 5.1은 기본 출력이 시스템 코드 페이지(한국어 Windows는 CP949)라 한글 경로가 깨진다. UTF-8로 받는다
+    const { stdout } = await run("powershell", ["-NoProfile", "-NonInteractive", "-Command", `[Console]::OutputEncoding=[Text.Encoding]::UTF8;${cmd}`], { windowsHide: true, timeout: 10_000, encoding: "utf8" });
     return stdout.trim() || null;
   } catch { return null; }
 }

@@ -267,9 +267,17 @@ function wizAddPath(p) {
 function saveSetup() {
   var e = wizardErrors(2, W).concat(wizardErrors(3, W));
   if (e.length) { W.errs = e; renderSetup(); return; }
-  W.busy = "save"; W.errs = []; renderSetup();
-  api("POST", "/api/setup", setupPayload(W)).then(function (r) {
+  postSetup(setupPayload(W));
+}
+/** adopt: 고른 결과 폴더에 이미 있는 MasterPortfolio 설정을 그대로 쓴다(덮어쓰지 않음) */
+function postSetup(payload) {
+  W.busy = "save"; W.errs = []; W.existing = null; renderSetup();
+  api("POST", "/api/setup", payload).then(function (r) {
     W.busy = null;
+    if (r.status === 409 && r.json && r.json.existing) {
+      W.existing = r.json.existing; W.errs = [errMsg(r)];
+      renderSetup(); return;
+    }
     if (r.ok || r.status === 409) {
       W.saved = true; W.savedOut = r.ok ? r.json.output : W.output.trim();
       renderSetup(); focusStep();
@@ -303,6 +311,14 @@ function renderSetup() {
     })));
     var body = st === 1 ? step1() : st === 2 ? step2() : st === 3 ? step3() : step4();
     body.push(errList(W.errs));
+    if (W.existing) {
+      var ex = W.existing;
+      body.push(el("div", { class: "su-row" }, [
+        el("button", { type: "button", class: "btn primary", "data-k": "w:adopt", disabled: !!W.busy,
+          onclick: function () { var p = setupPayload(W); p.adopt = true; p.output = ex; postSetup(p); }, text: "기존 결과 그대로 사용" }),
+        el("span", { class: "muted small", text: "또는 3단계에서 다른 결과 폴더를 고르세요" })
+      ]));
+    }
     body.push(wizFoot());
     R.appendChild(el("form", { class: "card su-card", novalidate: true, "aria-labelledby": "su-title",
       onsubmit: function (ev) { ev.preventDefault(); wizSubmit(); } }, body));
