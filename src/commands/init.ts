@@ -14,6 +14,8 @@ import type { Config } from "../core/schema.js";
 
 export type InitOptions = {
   nonInteractive?: boolean; university?: string; folders?: string[]; agent?: string; output?: string;
+  /** 요금제 배수(9.8 planScale): Pro 1, Max 5x 5, Max 20x 20 */
+  planScale?: number;
   /** false면 끝에서 폴더 범위 정리(5.5)를 하지 않는다(`--no-scope`). 기본 true */
   scope?: boolean;
   /** 테스트용: 폴더 범위 단계 교체 */
@@ -59,6 +61,7 @@ export async function runInit(opts: InitOptions): Promise<number> {
     const scanFolders = normalizeFolders(opts.folders ?? []);
     warnOutputInsideScan(output, scanFolders);
     const c = defaultConfig({ university: { input: opts.university ?? "", keywords }, scanFolders, agent: agentName });
+    if (opts.planScale) c.budget.planScale = opts.planScale;
     if (c.agents[c.agent]) c.agents[c.agent] = await withLocalExecutable(c.agent, c.agents[c.agent]);
     await saveConfig(output, c); await writeOutputPointer(output);
     console.log(`설정을 저장했습니다: ${join(output, ".mp", "config.json")}`);
@@ -86,10 +89,17 @@ export async function runInit(opts: InitOptions): Promise<number> {
   const extraFolder = await input({ message: "직접 추가할 폴더 경로 (쉼표 구분, 없으면 Enter):" });
   folders.push(...normalizeFolders(extraFolder.split(",")));
   const agent = await select({ message: "사용할 에이전트", choices: V1_AGENTS.map((k) => ({ name: k, value: k as string })) });
+  // 사용량 예산(9.8)은 Pro 기준이라, 더 큰 요금제면 배수로 환산한다
+  const planScale = agent === "claude"
+    ? await select({ message: "Claude 구독 요금제 (사용량 예산 계산용)", choices: [
+      { name: "Pro", value: 1 }, { name: "Max 5x", value: 5 }, { name: "Max 20x", value: 20 },
+    ] })
+    : 1;
   const outDir = normalizeFolderInput(await input({ message: "결과 폴더", default: output })) ?? output;
   const scanFolders = [...new Set(normalizeFolders(folders))];
   warnOutputInsideScan(outDir, scanFolders);
   const c = defaultConfig({ university: { input: uniInput, keywords }, scanFolders, agent });
+  c.budget.planScale = planScale;
   c.agents[agent] = await withLocalExecutable(agent, c.agents[agent]);
   if (!c.agents[agent].env?.CLAUDE_CODE_EXECUTABLE && !c.agents[agent].env?.CODEX_PATH) {
     console.log(`! 설치된 ${agent} CLI를 찾지 못했습니다. 어댑터에 포함된 CLI를 사용합니다. 공식 CLI를 설치·로그인한 뒤 \`mp init\`을 다시 실행하는 것을 권장합니다.`);

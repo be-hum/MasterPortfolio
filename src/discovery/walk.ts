@@ -1,5 +1,5 @@
 import type { Dirent, Stats } from "node:fs";
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isSystemPath } from "./system.js";
@@ -163,6 +163,8 @@ export async function walk(root: string, opts: WalkOptions = {}) {
     let names: Dirent[];
     try { names = await readdir(dir, { withFileTypes: true }); }
     catch { inaccessible.push(dir); return; }
+    // MasterPortfolio 결과 폴더(현재 것이 아니어도: 옮긴 백업·다른 결과 폴더)는 우리가 만든 카드라 다시 분석하지 않는다
+    if (names.some((d) => d.name === ".mp") && (await isFile(join(dir, ".mp", "config.json")))) { generated.push(dir); return; }
     if (!scopeExcluded && names.some((d) => d.name === ".git")) { entries.push({ kind: "repo", path: dir }); return; }
     names.sort((a, b) => a.name.localeCompare(b.name));
     const split = splitOutputFiles(names.filter((d) => !d.isDirectory() && !isExcludedFileName(d.name)).map((d) => d.name));
@@ -189,3 +191,5 @@ export async function walk(root: string, opts: WalkOptions = {}) {
   await visit(root);
   return { entries, inaccessible, generated };
 }
+
+const isFile = (p: string) => stat(p).then((s) => s.isFile(), () => false);

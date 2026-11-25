@@ -31,6 +31,7 @@ export function buildProgram(): Command {
   program.exitOverride();
   program.command("init").description("대학명·스캔 폴더·에이전트 설정")
     .option("--non-interactive").option("--university <name>").option("--folders <paths...>").option("--agent <name>").option("--output <dir>")
+    .option("--plan-scale <n>", "Claude 요금제 배수: Pro 1, Max 5x 5, Max 20x 20", parseLimit)
     .option("--no-scope", "끝에서 폴더 범위 정리(mp scope)를 하지 않음")
     .action(async (o) => { process.exitCode = await runInit(o); });
   program.command("doctor").description("환경 점검").option("--skip-agent")

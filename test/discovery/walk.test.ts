@@ -22,6 +22,19 @@ describe("walk", () => {
     expect(files).toEqual([join(root, "과제", "보고서.pdf")]);
     expect(repos).toEqual([join(root, "app")]);
   });
+
+  it("skips any MasterPortfolio output folder (e.g. a moved backup), but not a folder that merely has .mp", async () => {
+    const root = await mkTmp();
+    await mkdir(join(root, "MasterPortfolio-backup", ".mp"), { recursive: true });
+    await writeFile(join(root, "MasterPortfolio-backup", ".mp", "config.json"), "{}");
+    await mkdir(join(root, "MasterPortfolio-backup", "files"), { recursive: true });
+    await writeFile(join(root, "MasterPortfolio-backup", "files", "card.md"), "x");
+    await mkdir(join(root, "other", ".mp"), { recursive: true });
+    await writeFile(join(root, "other", "note.md"), "x");
+    const { entries, generated } = await walk(root);
+    expect(entries.map((e) => e.path)).toEqual([join(root, "other", "note.md")]);
+    expect(generated).toContain(join(root, "MasterPortfolio-backup"));
+  });
 });
 
 describe("walk exclusions", () => {

@@ -837,6 +837,8 @@ describe("runInit --non-interactive", () => {
     expect(await runInit({ nonInteractive: true, agent: "claude", output: out, folders: [docs], runScope, scope: false })).toBe(0);
     expect(await runInit({ nonInteractive: true, agent: "claude", output: out, folders: [], runScope })).toBe(0);
     expect(runScope).not.toHaveBeenCalled();
+    expect(await runInit({ nonInteractive: true, agent: "claude", output: out, folders: [], runScope, planScale: 5 })).toBe(0);
+    expect(JSON.parse(await readFile(join(out, ".mp", "config.json"), "utf8")).budget.planScale).toBe(5);
   });
 
   it("normalizeFolderInput handles ~, ~\\, quotes and blanks", () => {
