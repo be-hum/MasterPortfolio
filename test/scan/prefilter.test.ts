@@ -29,6 +29,7 @@ describe("prefilter", () => {
       await file(d, "b.md", long),             // duplicate of a.md
       await file(d, "tiny.txt", "short"),      // < 200 bytes
       await file(d, "pic.png", "x"),           // unsupported
+      await file(d, "보고서.hwp", "x"),         // unsupported, but a document we can't read yet
       { kind: "file" as const, path: join(d, "huge.pdf"), size: 60_000_000, mtimeMs: 0 },
       { kind: "repo" as const, path: join(d, "repo") }, // M1: unsupported
     ];
@@ -36,7 +37,8 @@ describe("prefilter", () => {
     expect(r.candidates.map((c) => c.path)).toEqual([join(d, "a.md")]);
     expect(r.candidates[0].duplicates).toEqual([normalizePath(join(d, "b.md"))]);
     expect(r.skippedLarge).toEqual([{ path: join(d, "huge.pdf"), size: 60_000_000 }]);
-    expect(r.unsupported).toBe(2);
+    expect(r.unsupported).toBe(3);
+    expect(r.unreadable).toEqual([join(d, "보고서.hwp")]);
   });
 
   it("skips known files and reports changed ones", async () => {

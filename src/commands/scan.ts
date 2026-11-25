@@ -145,6 +145,7 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
   report.changed = pre.changed.map(normalizePath);
   report.skippedLarge = pre.skippedLarge.map((s) => ({ path: normalizePath(s.path), size: s.size }));
   report.unsupported = pre.unsupported;
+  report.unreadable = pre.unreadable.map(normalizePath);
 
   const duplicateEntry = (hash: string) => ({ source_hash: hash, card: null, card_body_hash: null, card_snapshot: null, status: "duplicate" as const });
   for (const d of pre.knownDuplicates) {
@@ -397,6 +398,12 @@ export function scanSummary(r: ScanReport): string {
   n(r.skippedLarge.length, "크기 초과");
   n(r.skippedLong.length, "너무 긴 문서");
   n(r.analysisFailed.length + r.extractFailed.length, "분석 실패");
+  const ur = r.unreadable ?? [];
+  if (ur.length) {
+    const by = new Map<string, number>();
+    for (const p of ur) { const e = (p.match(/\.([^./\\]+)$/)?.[1] ?? "").toUpperCase(); by.set(e, (by.get(e) ?? 0) + 1); }
+    parts.push(`읽지 못한 ${[...by].map(([e, c]) => `${e} ${c}개`).join("·")}(PDF로 내보내면 분석)`);
+  }
   if (!r.created.length && !r.judgement?.judged) parts.unshift("새로 분석할 자료 없음");
   if (r.stoppedReason) parts.push(`중단: ${r.stoppedReason.split(/[—.]/)[0].trim()}`);
   return parts.join(" · ");

@@ -103,6 +103,8 @@ describe("runScan", () => {
     expect(scanSummary({ ...base, changed: ["a", "b"] })).toContain("원본이 바뀐 파일 2개(아직 다시 분석하지 않음)");
     expect(scanSummary({ ...base, created: ["files/a.md", "files/b.md"], judgement: { judged: 2, unjudged: 0, skippedEdited: [] }, skippedLarge: [], skippedIrrelevant: ["x"] }))
       .toBe("새 카드 2개 · 판정 2개 · 무관해 보여 제외 1개");
+    expect(scanSummary({ ...base, skippedLarge: [], unreadable: ["C:/a/x.hwp", "C:/a/y.HWP", "C:/b/z.doc"] }))
+      .toBe("새로 분석할 자료 없음 · 읽지 못한 HWP 2개·DOC 1개(PDF로 내보내면 분석)");
   });
 
   it("second scan sends nothing new", async () => {

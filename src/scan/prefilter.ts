@@ -20,7 +20,12 @@ export type PrefilterResult = {
   knownDuplicates: { path: string; key: string; hash: string; card: string }[];
   /** 선별(triage)에서 drop된 내용과 같은 새 경로(다시 보내지 않음, 9.7 E) */
   knownIrrelevant: { path: string; key: string; hash: string }[];
+  /** 문서지만 아직 읽지 못하는 형식(HWP·옛 Office): PDF로 내보내면 분석할 수 있다고 알린다 */
+  unreadable: string[];
 };
+
+/** 이력서 자료일 수 있지만 아직 텍스트를 뽑지 못하는 문서 형식 */
+export const UNREADABLE_DOC_EXT = new Set([".hwp", ".hwpx", ".doc", ".ppt"]);
 
 export type PrefilterOptions = {
   /** 진행률 표시용: 확인한 항목 수 / 전체 */
@@ -32,7 +37,7 @@ export type PrefilterOptions = {
 };
 
 export async function prefilter(entries: WalkEntry[], state: State, limits: Config["limits"], opts: PrefilterOptions = {}): Promise<PrefilterResult> {
-  const res: PrefilterResult = { candidates: [], changed: [], skippedLarge: [], unsupported: 0, knownDuplicates: [], knownIrrelevant: [] };
+  const res: PrefilterResult = { candidates: [], changed: [], skippedLarge: [], unsupported: 0, knownDuplicates: [], knownIrrelevant: [], unreadable: [] };
   const byHash = new Map<string, Candidate>();
   // 이미 카드가 있는 내용의 해시 → 카드. 새 경로의 사본은 다시 분석하지 않는다.
   const cardByHash = new Map<string, string>();
@@ -48,8 +53,9 @@ export async function prefilter(entries: WalkEntry[], state: State, limits: Conf
   for (const e of entries) {
     if (++seen % 50 === 0) opts.onProgress?.(seen, entries.length);
     if (e.kind === "repo") { res.unsupported++; continue; }
-    const format = SUPPORTED_EXT[extname(e.path).toLowerCase()];
-    if (!format) { res.unsupported++; continue; }
+    const ext = extname(e.path).toLowerCase();
+    const format = SUPPORTED_EXT[ext];
+    if (!format) { res.unsupported++; if (UNREADABLE_DOC_EXT.has(ext)) res.unreadable.push(e.path); continue; }
     if (e.size > limits.maxFileBytes) { res.skippedLarge.push({ path: e.path, size: e.size }); continue; }
     if ((format === "md" || format === "txt") && e.size < limits.minTextBytes) continue;
     const key = normalizePath(e.path);
