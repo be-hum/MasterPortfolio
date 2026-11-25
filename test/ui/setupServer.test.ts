@@ -1,0 +1,168 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { mkTmp } from "../helpers/tmp.js";
+import { startUiServer, type SetupDeps } from "../../src/ui/server.js";
+import { PickUnavailable } from "../../src/setup/pickFolder.js";
+import { loadConfig, saveConfig } from "../../src/config/config.js";
+import { resolveOutputDir } from "../../src/core/paths.js";
+
+const TOKEN = "t".repeat(64);
+const dirs: string[] = [];
+const closers: (() => Promise<void>)[] = [];
+
+async function boot(out: string | null, setupDeps: SetupDeps = {}) {
+  const srv = await startUiServer({ out, token: TOKEN, cliPath: "unused.js", html: () => "x", setupDeps });
+  closers.push(srv.close);
+  const call = async (method: string, path: string, body?: unknown) => {
+    const r = await fetch(`http://127.0.0.1:${srv.port}${path}`, { method, headers: { "x-mp-token": TOKEN, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await r.text(); let json: any = null; try { json = JSON.parse(text); } catch { /* */ }
+    return { status: r.status, json };
+  };
+  return { call };
+}
+const tmp = async () => { const d = await mkTmp("mp-su-"); dirs.push(d); return d; };
+
+describe("setup mode (11.6)", () => {
+  beforeEach(async () => { vi.spyOn(console, "log").mockImplementation(() => {}); process.env.MP_POINTER_FILE = join(await tmp(), "ptr.json"); delete process.env.MP_OUTPUT_DIR; });
+  afterEach(async () => {
+    vi.restoreAllMocks(); delete process.env.MP_POINTER_FILE; delete process.env.MP_OUTPUT_DIR;
+    await Promise.all(closers.splice(0).map((c) => c()));
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  it("blocks data/job/settings routes with 409 and reports setup:true", async () => {
+    const { call } = await boot(null);
+    expect((await call("GET", "/api/state")).json).toEqual({ ok: true, setup: true });
+    for (const [m, p] of [["GET", "/api/job"], ["POST", "/api/job"], ["POST", "/api/decide"], ["GET", "/api/settings"], ["POST", "/api/settings"], ["POST", "/api/settings/scope-reset"], ["GET", "/files/x.md"]] as const) {
+      const r = await call(m, p, m === "POST" ? {} : undefined);
+      expect([p, r.status, r.json?.error]).toEqual([p, 409, "처음 설정이 필요합니다."]);
+    }
+  });
+
+  it("suggests folders, expands university, and returns the injected default output", async () => {
+    const seen: string[][] = [];
+    const { call } = await boot(null, {
+      suggest: async (k) => { seen.push(k); return [{ path: "/a", label: "A", kind: "documents", checked: true }]; },
+      defaultOutput: async () => "/out/default",
+    });
+    const r = await call("GET", "/api/setup/suggest?university=" + encodeURIComponent("연세대"));
+    expect(r.status).toBe(200);
+    expect(r.json.keywords).toContain("연세대학교");
+    expect(seen[0]).toEqual(r.json.keywords);
+    expect(r.json.folders).toHaveLength(1);
+    expect(r.json.defaultOutput).toBe("/out/default");
+  });
+
+  it("setup success switches to normal mode; second setup is 409; invalid is 400", async () => {
+    const scan = await tmp(), out = join(await tmp(), "결과");
+    const { call } = await boot(null);
+    const bad = await call("POST", "/api/setup", { university: "연세대", keywords: ["연세대"], folders: [join(scan, "nope")], planScale: 1, output: out });
+    expect(bad.status).toBe(400);
+    expect(bad.json.errors.length).toBeGreaterThan(0);
+    const ok = await call("POST", "/api/setup", { university: "연세대", keywords: ["연세대"], folders: [scan], planScale: 5, output: out });
+    expect(ok.status).toBe(200);
+    expect(ok.json.output).toBe(out);
+    const st = await call("GET", "/api/state");
+    expect(Array.isArray(st.json.experiences)).toBe(true);
+    expect((await loadConfig(out)).budget.planScale).toBe(5);
+    expect(await resolveOutputDir()).toBe(out);
+    expect((await call("POST", "/api/setup", { university: "x", keywords: [], folders: [scan], planScale: 1, output: out })).status).toBe(409);
+  });
+
+  it("pick-folder: one at a time, unavailable -> 400, file -> 400, folder ok", async () => {
+    const d = await tmp(); const f = join(d, "f.txt"); await writeFile(f, "x");
+    let release: (() => void) | undefined; let next: string | null = d; let throwIt = false;
+    const { call } = await boot(null, { pick: async () => { if (throwIt) throw new PickUnavailable(); await new Promise<void>((r) => { release = r; }); return next; } });
+    const first = call("POST", "/api/pick-folder", {});
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    expect((await call("POST", "/api/pick-folder", {})).status).toBe(409);
+    release!(); release = undefined;
+    expect((await first).json).toEqual({ ok: true, path: d });
+    next = f; const p2 = call("POST", "/api/pick-folder", {});
+    await vi.waitFor(() => expect(release).toBeTypeOf("function")); release!();
+    expect((await p2).status).toBe(400);
+    throwIt = true;
+    const r = await call("POST", "/api/pick-folder", {});
+    expect(r.status).toBe(400); expect(r.json.error).toContain("직접 입력");
+  });
+
+  it("check returns the injected result (null out in setup mode)", async () => {
+    const items = [{ ok: true, label: "Node" }];
+    let args: unknown[] = [];
+    const { call } = await boot(null, { check: async (...a) => { args = a; return items; } });
+    const r = await call("POST", "/api/check", { skipAgent: true });
+    expect(r.json).toEqual({ ok: true, items });
+    expect(args).toEqual([null, { skipAgent: true }]);
+  });
+});
+
+describe("settings API (11.6)", () => {
+  afterEach(async () => {
+    vi.restoreAllMocks(); delete process.env.MP_POINTER_FILE;
+    await Promise.all(closers.splice(0).map((c) => c()));
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  async function normal() {
+    const scan = await tmp(), out = await tmp();
+    const { createSetupConfig } = await import("../../src/setup/config.js");
+    process.env.MP_POINTER_FILE = join(await tmp(), "p.json");
+    await createSetupConfig({ university: "연세대", keywords: ["연세대"], folders: [scan], planScale: 1, output: out });
+    const c = await loadConfig(out);
+    c.scope.decisions = {
+      [join(scan, "a")]: { decision: "exclude", by: "user", at: "t" },
+      [join(scan, "a", "b")]: { decision: "include", by: "llm", at: "t" },
+      [join(scan, "c")]: { decision: "exclude", by: "llm", at: "t" },
+    };
+    await saveConfig(out, c);
+    return { scan, out, ...(await boot(out)) };
+  }
+
+  it("GET returns settings; POST saves planScale and a new folder", async () => {
+    const { scan, out, call } = await normal();
+    const g = await call("GET", "/api/settings");
+    expect(g.json).toMatchObject({ ok: true, output: out, university: "연세대", keywords: ["연세대"], scanFolders: [scan], planScale: 1 });
+    expect(g.json.scope).toHaveLength(3);
+    expect(g.json.scope[0]).toHaveProperty("by");
+    const extra = await tmp(); await mkdir(join(extra, "z"));
+    const p = await call("POST", "/api/settings", { planScale: 5, fiveHourShare: 0.5, scanFolders: [scan, extra], keywords: ["연세대", " 신촌 "] });
+    expect(p.status).toBe(200);
+    const c = await loadConfig(out);
+    expect(c.budget).toMatchObject({ planScale: 5, fiveHourShare: 0.5 });
+    expect(c.scanFolders).toEqual([scan, extra]);
+    expect(c.university.keywords).toEqual(["연세대", "신촌"]);
+  });
+
+  it("rejects bad values with 400", async () => {
+    const { scan, out, call } = await normal();
+    expect((await call("POST", "/api/settings", { scanFolders: [scan, join(scan, "없는")] })).status).toBe(400);
+    expect((await call("POST", "/api/settings", { scanFolders: [out] })).status).toBe(400);
+    expect((await call("POST", "/api/settings", { planScale: 3 })).status).toBe(400);
+    expect((await call("POST", "/api/settings", { fiveHourShare: 0.01 })).status).toBe(400);
+    expect((await call("POST", "/api/settings", { fiveHourShare: 1.5 })).status).toBe(400);
+    expect((await loadConfig(out)).budget.planScale).toBe(1);
+  });
+
+  it("returns 409 while a job runs", async () => {
+    const scan = await tmp(), out = await tmp();
+    const { createSetupConfig } = await import("../../src/setup/config.js");
+    process.env.MP_POINTER_FILE = join(await tmp(), "p.json");
+    await createSetupConfig({ university: "x", keywords: [], folders: [scan], planScale: 1, output: out });
+    const cli = join(await tmp(), "slow.js"); await writeFile(cli, "setTimeout(()=>{},3000)");
+    const srv = await startUiServer({ out, token: TOKEN, cliPath: cli, html: () => "x" });
+    closers.push(srv.close);
+    const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${srv.port}${path}`, { method: "POST", headers: { "x-mp-token": TOKEN }, body: JSON.stringify(body) });
+    expect((await post("/api/job", { kind: "scan" })).status).toBe(200);
+    expect((await post("/api/settings", { planScale: 5 })).status).toBe(409);
+    expect((await post("/api/settings/scope-reset", { path: scan })).status).toBe(409);
+  });
+
+  it("scope-reset removes the path and its children only", async () => {
+    const { scan, out, call } = await normal();
+    const r = await call("POST", "/api/settings/scope-reset", { path: join(scan, "a") });
+    expect(r.json).toEqual({ ok: true, removed: 2 });
+    expect(Object.keys((await loadConfig(out)).scope.decisions)).toEqual([join(scan, "c")]);
+    expect((await call("POST", "/api/settings/scope-reset", {})).status).toBe(400);
+  });
+});
