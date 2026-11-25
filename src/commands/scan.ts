@@ -382,10 +382,10 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
 /** 화면 작업 바용 한 줄 요약. 새로 분석한 것이 없으면 그렇게 말한다 */
 export function scanSummary(r: ScanReport): string {
   const parts: string[] = [];
-  const n = (x: number, label: string) => { if (x) parts.push(`${label} ${x}개`); };
+  const n = (x: number, label: string, suffix = "") => { if (x) parts.push(`${label} ${x}개${suffix}`); };
   n(r.created.length, "새 카드");
   if (r.judgement?.judged) parts.push(`판정 ${r.judgement.judged}개`);
-  n(r.changed.length, "원본이 바뀐 파일");
+  n(r.changed.length, "원본이 바뀐 파일", "(아직 다시 분석하지 않음)");
   n(r.skippedIrrelevant?.length ?? 0, "무관해 보여 제외");
   n(r.skippedSensitive.length, "민감 정보로 건너뜀");
   n(r.skippedLarge.length, "크기 초과");

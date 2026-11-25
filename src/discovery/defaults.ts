@@ -18,13 +18,20 @@ async function exists(p: string | null): Promise<boolean> {
   try { return (await stat(p)).isDirectory(); } catch { return false; }
 }
 
+/** Windows의 실제 문서·바탕 화면·다운로드 위치(OneDrive 리디렉션 반영). 실패하면 null */
+export async function winFolder(name: "MyDocuments" | "Desktop" | "Downloads"): Promise<string | null> {
+  return name === "Downloads"
+    ? ps("(New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path")
+    : ps(`[Environment]::GetFolderPath('${name}')`);
+}
+
 export async function defaultFolders(): Promise<string[]> {
   const home = homedir();
   let docs: string | null = join(home, "Documents");
   let downloads: string | null = join(home, "Downloads");
   if (process.platform === "win32") {
-    docs = (await ps("[Environment]::GetFolderPath('MyDocuments')")) ?? docs;
-    downloads = (await ps("(New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path")) ?? downloads;
+    docs = (await winFolder("MyDocuments")) ?? docs;
+    downloads = (await winFolder("Downloads")) ?? downloads;
   }
   const out: string[] = [];
   for (const p of [docs, downloads]) if (await exists(p)) out.push(p!);

@@ -931,7 +931,7 @@ function renderJob() {
   if (j && j.lines.length) left.appendChild(el("button", { type: "button", class: "linklike", "data-k": "log", "aria-expanded": String(S.showLog),
     onclick: function () { S.showLog = !S.showLog; renderJob(); }, text: S.showLog ? "로그 닫기" : "로그 보기" }));
   var right = el("div", { class: "jb-right" }, [
-    el("button", { type: "button", class: "btn", "data-k": "job:scan", disabled: run, title: "설정한 폴더에서 새로 생기거나 바뀐 자료를 찾아 카드로 만들기(에이전트 사용)", onclick: function () { startJob("scan"); }, text: "새 자료 스캔" }),
+    el("button", { type: "button", class: "btn", "data-k": "job:scan", disabled: run, title: "설정한 폴더에서 새로 생긴 자료를 찾아 카드로 만들기(바뀐 파일은 알려 주기만 함, 에이전트 사용)", onclick: function () { startJob("scan"); }, text: "새 자료 스캔" }),
     el("button", { type: "button", class: "btn", "data-k": "job:group", disabled: run, title: "아직 경험에 묶이지 않은 카드를 경험으로 묶기(에이전트 사용)", onclick: function () { startJob("group"); }, text: "경험 묶기" }),
     el("span", { class: "jb-sep", "aria-hidden": "true" }),
     el("button", { type: "button", class: "btn primary", "data-k": "job:apply", disabled: run || !pend, title: !pend ? "반영할 답이 없습니다" : "답변을 카드 필드·STAR에 반영(에이전트 사용)", onclick: function () { startJob("apply"); }, text: "반영 실행" }),
