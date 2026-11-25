@@ -5,20 +5,20 @@ const set = (...p: string[]) => (x: string) => p.includes(x);
 
 describe("suggestFolders", () => {
   it("win32: basics checked, OneDrive cloud, other drives, keyword candidates, deduped, ordered", async () => {
-    const home = "C:/Users/u";
+    const home = "C:\\Users\\u";
     const r = await suggestFolders(["연세"], {
       home, platform: "win32", systemDrive: "C:",
-      winFolder: async (n) => ({ MyDocuments: "C:/Users/u/OneDrive - Univ/Documents", Desktop: "C:/Users/u/Desktop", Downloads: "C:/Users/u/Downloads" })[n],
-      exists: set("C:/Users/u/OneDrive - Univ/Documents", "C:/Users/u/Desktop", "C:/Users/u/Downloads", "C:/Users/u/OneDrive - Univ", "C:/Users/u/OneDrive - Other", "C:\\", "D:\\", "E:\\"),
+      winFolder: async (n) => ({ MyDocuments: "C:\\Users\\u\\OneDrive - Univ\\Documents", Desktop: "C:\\Users\\u\\Desktop", Downloads: "C:\\Users\\u\\Downloads" })[n],
+      exists: set("C:\\Users\\u\\OneDrive - Univ\\Documents", "C:\\Users\\u\\Desktop", "C:\\Users\\u\\Downloads", "C:\\Users\\u\\OneDrive - Univ", "C:\\Users\\u\\OneDrive - Other", "C:\\", "D:\\", "E:\\"),
       listDir: (p) => p === home ? ["OneDrive - Univ", "OneDrive - Other", "x"] : [],
-      candidates: async () => ["C:/Users/u/proj", "C:/Users/u/Downloads/sub", "C:/Users/u/desktop"],
+      candidates: async () => ["C:\\Users\\u\\proj", "C:\\Users\\u\\Downloads\\sub", "C:\\Users\\u\\desktop"],
     });
     expect(r.map((s) => [s.kind, s.checked])).toEqual([
       ["documents", true], ["downloads", true], ["desktop", true], ["cloud", false], ["drive", false], ["drive", false], ["keyword", false],
     ]);
     expect(r.find((s) => s.kind === "cloud")!.label).toBe("클라우드: OneDrive - Other");
     expect(r.filter((s) => s.kind === "drive").map((s) => s.label)).toEqual(["드라이브 D:", "드라이브 E:"]);
-    expect(r.at(-1)!.path).toBe("C:/Users/u/proj");
+    expect(r.at(-1)!.path).toBe("C:\\Users\\u\\proj");
     expect(r[0].label).toBe("문서");
   });
 

@@ -1,6 +1,9 @@
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { posix, win32 } from "node:path";
+
+/** 대상 플랫폼의 경로 규칙(테스트에서 플랫폼을 주입해도 실행 OS와 무관하게 같은 결과) */
+const pathFor = (platform: NodeJS.Platform) => (platform === "win32" ? win32 : posix);
 import { findCandidateFolders } from "../discovery/candidates.js";
 import { winFolder as realWinFolder } from "../discovery/defaults.js";
 import { pathKey } from "../core/paths.js";
@@ -28,6 +31,7 @@ const list = (p: string) => { try { return readdirSync(p); } catch { return []; 
 async function basics(d: FolderDeps) {
   const home = d.home ?? homedir();
   const platform = d.platform ?? process.platform;
+  const join = pathFor(platform).join;
   const exists = d.exists ?? isDir;
   const win = d.winFolder ?? realWinFolder;
   const pick = async (n: "MyDocuments" | "Desktop" | "Downloads", fallback: string) =>
@@ -42,6 +46,7 @@ async function basics(d: FolderDeps) {
 
 export async function suggestFolders(keywords: string[], deps: FolderDeps = {}): Promise<FolderSuggestion[]> {
   const { home, platform, exists, docs, downloads, desktop } = await basics(deps);
+  const join = pathFor(platform).join;
   const listDir = deps.listDir ?? list;
   const out: FolderSuggestion[] = [];
   const key = (p: string) => pathKey(p, platform);
@@ -92,6 +97,6 @@ export async function suggestFolders(keywords: string[], deps: FolderDeps = {}):
 }
 
 export async function defaultOutputDir(deps: FolderDeps = {}): Promise<string> {
-  const { home, exists, docs } = await basics(deps);
-  return join(exists(docs) ? docs : home, "MasterPortfolio");
+  const { home, platform, exists, docs } = await basics(deps);
+  return pathFor(platform).join(exists(docs) ? docs : home, "MasterPortfolio");
 }

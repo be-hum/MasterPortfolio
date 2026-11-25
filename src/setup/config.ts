@@ -4,7 +4,7 @@ import { isForeignPath, pathKey, writeOutputPointer } from "../core/paths.js";
 import { existsSync } from "node:fs";
 import { withLocalExecutable } from "../agent/agents.js";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { join, posix, resolve, win32 } from "node:path";
 import type { Config } from "../core/schema.js";
 
 /** 사용자가 입력한 폴더 경로: 앞뒤 공백·감싼 따옴표 제거, 맨 앞 `~` 펼치기, 절대경로로. 빈 입력은 null. */
@@ -31,7 +31,7 @@ export function pathInputError(raw: string, platform: NodeJS.Platform = process.
   if (s.length >= 2 && /^(["']).*\1$/s.test(s)) s = s.slice(1, -1).trim();
   if (!s || s === "~" || /^~[\\/]/.test(s)) return null;
   if (isForeignPath(s, platform)) return `이 PC에서 쓸 수 없는 경로 형식입니다: ${s}`;
-  if (!isAbsolute(s)) return `전체 경로를 입력하세요(예: ${platform === "win32" ? "C:\\Users\\이름\\Documents" : "/Users/이름/Documents"}): ${s}`;
+  if (!(platform === "win32" ? win32 : posix).isAbsolute(s)) return `전체 경로를 입력하세요(예: ${platform === "win32" ? "C:\\Users\\이름\\Documents" : "/Users/이름/Documents"}): ${s}`;
   return null;
 }
 
