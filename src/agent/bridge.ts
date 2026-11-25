@@ -128,6 +128,12 @@ export class AcpBridge {
       await this.removeWorkDir();
       throw new AgentError("crash", `에이전트 실행 실패: ${describeError(e)}`);
     }
+    // 시작 뒤 연결 단계에서 실패해도(예: Windows에서 없는 명령은 cmd.exe가 뜬 뒤 종료) 프로세스를 끄고 작업 폴더를 지운다
+    try { await this.connect(proc); }
+    catch (e) { await this.stop(); throw e; }
+  }
+
+  private async connect(proc: ChildProcess): Promise<void> {
     proc.on("exit", (code, signal) => { this.exited = `에이전트 프로세스 종료 (code ${code}${signal ? `, ${signal}` : ""})`; });
     proc.stdin?.on("error", (e) => this.opts.log?.(`[agent stdin] ${describeError(e)}`));
     proc.stderr?.on("data", (d) => this.opts.log?.(`[agent stderr] ${String(d).trimEnd()}`));

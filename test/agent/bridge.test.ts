@@ -93,6 +93,16 @@ describe("AcpBridge", () => {
     await b.stop();
   });
 
+  it("removes its work dir when the agent starts but exits before the handshake (Windows cmd.exe for a missing command)", async () => {
+    const logged: string[] = [];
+    const b = new AcpBridge({ command: process.execPath, args: ["-e", "process.exit(1)"] }, { log: (l) => logged.push(l) });
+    const err = await b.start().then(() => null, (e) => e);
+    const workDir = logged.map((l) => l.match(/^\[workdir\] (.+)$/)?.[1]).find(Boolean);
+    expect(err).toBeInstanceOf(AgentError);
+    expect(existsSync(workDir!)).toBe(false);
+    await b.stop();
+  });
+
   it("does not leak a timed-out turn's late chunks into the next turn", async () => {
     const d = await mkTmp(); const log = join(d, "log.jsonl");
     const b = new AcpBridge(cfg({ FAKE_AGENT_SCENARIO: "slow", FAKE_AGENT_STATE: join(d, "n"), FAKE_AGENT_LOG: log }));
