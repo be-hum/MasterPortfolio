@@ -241,6 +241,14 @@ function wizNext() {
   }
   if (!W.saved) saveSetup(); else finishSetup();
 }
+/** 폼 제출(Enter): 포커스한 입력칸에 따라 추가·찾기, 그 밖은 다음 (한글 조합 중 Enter가 제출로 이어져도 같은 결과) */
+function wizSubmit() {
+  var a = document.activeElement, k = a && a.getAttribute ? a.getAttribute("data-k") : null;
+  if (k === "w:uni") wizFind();
+  else if (k === "w:kwin") wizAddKw();
+  else if (k === "w:path") wizAddPath(W.pathIn);
+  else wizNext();
+}
 function wizPrev() { if (W.step > 1 && !W.saved && !W.busy) goStep(W.step - 1); }
 function wizAddKw() {
   var t = W.kwIn.trim();
@@ -250,6 +258,7 @@ function wizAddKw() {
   W.kwIn = ""; renderSetup();
 }
 function wizAddPath(p) {
+  if (!W) return;
   var s = stripQuotes(p);
   if (!s) return;
   W.folders = addFolderTo(W.folders, s); W.pathIn = ""; W.errs = [];
@@ -296,7 +305,7 @@ function renderSetup() {
     body.push(errList(W.errs));
     body.push(wizFoot());
     R.appendChild(el("form", { class: "card su-card", novalidate: true, "aria-labelledby": "su-title",
-      onsubmit: function (ev) { ev.preventDefault(); wizNext(); } }, body));
+      onsubmit: function (ev) { ev.preventDefault(); wizSubmit(); } }, body));
   });
 }
 function wizFoot() {
@@ -375,7 +384,7 @@ function step3() {
   out.push(el("div", { class: "inline" }, [
     inp("w:out", W.output, function (v) { W.output = v; W.outputAuto = false; }, { id: "w-out", placeholder: "결과 폴더 경로" }),
     el("button", { type: "button", class: "btn", "data-k": "w:opick", disabled: !!W.picking, onclick: function () {
-      pickFolder(W, "output", W.output, "결과 폴더 선택", function (p) { W.output = p; W.outputAuto = false; }, renderSetup); }, text: "폴더 선택…" })
+      pickFolder(W, "output", W.output, "결과 폴더 선택", function (p) { if (W) { W.output = p; W.outputAuto = false; } }, renderSetup); }, text: "폴더 선택…" })
   ]));
   out.push(pickNote(W, "output"));
   return out;
@@ -449,6 +458,7 @@ function settingsEsc(ev) {
   else closeSettings(false);
 }
 function setAddPath(p) {
+  if (!ST) return;
   var s = stripQuotes(p);
   if (!s) return;
   var k = folderKey(s);
@@ -583,36 +593,50 @@ function setKeywords() {
       onkeydown: onEnter(saveSettings) })
   ]);
 }
-function setScope() {
+function scopeResults() {
   var all = ST.data.scope || [];
   var rows = filterScope(all, ST.scopeQ);
+  var tb = el("tbody");
+  rows.forEach(function (r) {
+    tb.appendChild(el("tr", {}, [
+      el("td", { class: "path", text: r.path }),
+      el("td", { class: "nw dec-" + r.decision, text: SCOPE_LABEL[r.decision] || r.decision }),
+      el("td", { class: "nw", text: SCOPE_LABEL[r.by] || r.by }),
+      el("td", { class: "nw muted", text: String(r.at || "").slice(0, 10) }),
+      el("td", { class: "nw act" }, [el("button", { type: "button", class: "btn sm", "data-k": "set:rs:" + r.path, "aria-label": r.path + " 판단 초기화", disabled: busy(),
+        onclick: function () { ST.confirm = r.path; renderSettings(); var c = document.querySelector('[data-k="set:rsno"]'); if (c) c.focus(); }, text: "초기화" })])
+    ]));
+    if (ST.confirm === r.path) tb.appendChild(el("tr", { class: "cf" }, [el("td", { colspan: "5" }, [el("div", { class: "cf-in", role: "alert" }, [
+      el("p", { text: "이 경로와 하위 폴더의 판단을 지웁니다. 다음 스캔에서 다시 판단합니다." }),
+      el("button", { type: "button", class: "btn sm", "data-k": "set:rsno", onclick: function () { ST.confirm = null; renderSettings(); }, text: "취소" }),
+      el("button", { type: "button", class: "btn sm danger", "data-k": "set:rsyes", onclick: function () { resetScope(r.path); }, text: "초기화" })
+    ])])]));
+  });
+  return {
+    count: rows.length + "개" + (rows.length !== all.length ? " / 전체 " + all.length : ""),
+    body: rows.length ? el("table", { class: "tbl" }, [
+      el("thead", {}, [el("tr", {}, [el("th", { text: "경로" }), el("th", { text: "판단" }), el("th", { text: "판단 주체" }), el("th", { text: "날짜" }), el("th", {}, [el("span", { class: "sr", text: "초기화" })])])]),
+      tb
+    ]) : el("p", { class: "lead small", text: "찾는 판단이 없습니다." })
+  };
+}
+function setScope() {
+  var all = ST.data.scope || [];
   var kids = [];
   if (!all.length) kids.push(el("p", { class: "lead", style: "margin:0", text: "아직 판단한 폴더가 없습니다. 첫 스캔에서 자동으로 정리합니다." }));
   else {
+    var res = scopeResults();
+    var count = el("span", { class: "muted small", "aria-live": "polite", text: res.count });
+    var box = el("div", {}, [res.body]);
+    // 검색칸은 다시 만들지 않는다(한글 입력 조합이 끊기지 않게): 개수와 표만 바꾼다
     kids.push(el("div", { class: "tbl-tools" }, [
-      inp("set:scopeq", ST.scopeQ, function (v) { ST.scopeQ = v; renderSettings(); }, { type: "search", placeholder: "경로·포함·제외·LLM·사용자로 찾기", "aria-label": "폴더 범위 판단 찾기" }),
-      el("span", { class: "muted small", text: rows.length + "개" + (rows.length !== all.length ? " / 전체 " + all.length : "") })
+      inp("set:scopeq", ST.scopeQ, function (v) {
+        ST.scopeQ = v; ST.confirm = null;
+        var r2 = scopeResults(); count.textContent = r2.count; clear(box).appendChild(r2.body);
+      }, { type: "search", placeholder: "경로·포함·제외·LLM·사용자로 찾기", "aria-label": "폴더 범위 판단 찾기" }),
+      count
     ]));
-    var tb = el("tbody");
-    rows.forEach(function (r) {
-      tb.appendChild(el("tr", {}, [
-        el("td", { class: "path", text: r.path }),
-        el("td", { class: "nw dec-" + r.decision, text: SCOPE_LABEL[r.decision] || r.decision }),
-        el("td", { class: "nw", text: SCOPE_LABEL[r.by] || r.by }),
-        el("td", { class: "nw muted", text: String(r.at || "").slice(0, 10) }),
-        el("td", { class: "nw act" }, [el("button", { type: "button", class: "btn sm", "data-k": "set:rs:" + r.path, "aria-label": r.path + " 판단 초기화", disabled: busy(),
-          onclick: function () { ST.confirm = r.path; renderSettings(); var c = document.querySelector('[data-k="set:rsno"]'); if (c) c.focus(); }, text: "초기화" })])
-      ]));
-      if (ST.confirm === r.path) tb.appendChild(el("tr", { class: "cf" }, [el("td", { colspan: "5" }, [el("div", { class: "cf-in", role: "alert" }, [
-        el("p", { text: "이 경로와 하위 폴더의 판단을 지웁니다. 다음 스캔에서 다시 판단합니다." }),
-        el("button", { type: "button", class: "btn sm", "data-k": "set:rsno", onclick: function () { ST.confirm = null; renderSettings(); }, text: "취소" }),
-        el("button", { type: "button", class: "btn sm danger", "data-k": "set:rsyes", onclick: function () { resetScope(r.path); }, text: "초기화" })
-      ])])]));
-    });
-    kids.push(rows.length ? el("table", { class: "tbl" }, [
-      el("thead", {}, [el("tr", {}, [el("th", { text: "경로" }), el("th", { text: "판단" }), el("th", { text: "판단 주체" }), el("th", { text: "날짜" }), el("th", {}, [el("span", { class: "sr", text: "초기화" })])])]),
-      tb
-    ]) : el("p", { class: "lead small", text: "찾는 판단이 없습니다." }));
+    kids.push(box);
   }
   return card("set-h-s", "폴더 범위 판단", "스캔할 때 폴더마다 포함·제외를 정해 둔 기록입니다. 초기화하면 그 경로와 하위 판단이 지워지고 다음 스캔에서 다시 판단합니다.", kids);
 }

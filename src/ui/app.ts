@@ -365,6 +365,7 @@ function load() {
       if (busy()) ensurePoll();
     }
     renderPrint(); render();
+    if (S.settings) renderSettings(); // 작업이 끝나면 저장·초기화 버튼을 다시 켠다
   }, function () { S.loading = false; S.error = "서버에 연결할 수 없습니다. 터미널에서 mp ui가 실행 중인지 확인하세요."; render(); });
 }
 
