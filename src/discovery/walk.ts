@@ -167,6 +167,8 @@ export async function walk(root: string, opts: WalkOptions = {}) {
     catch { inaccessible.push(dir); return; }
     // MasterPortfolio 결과 폴더(현재 것이 아니어도: 옮긴 백업·다른 결과 폴더)는 우리가 만든 카드라 다시 분석하지 않는다
     if (names.some((d) => d.name === ".mp") && (await isFile(join(dir, ".mp", "config.json")))) { generated.push(dir); return; }
+    // MasterPortfolio 프로그램 폴더(압축 해제본·설치본: app/dist/cli.js + runtime)도 분석 대상이 아니다
+    if (names.some((d) => d.name === "runtime") && (await isFile(join(dir, "app", "dist", "cli.js")))) { generated.push(dir); return; }
     if (!scopeExcluded && names.some((d) => d.name === ".git")) { entries.push({ kind: "repo", path: dir }); return; }
     names.sort((a, b) => a.name.localeCompare(b.name));
     const split = splitOutputFiles(names.filter((d) => !d.isDirectory() && !isExcludedFileName(d.name)).map((d) => d.name));

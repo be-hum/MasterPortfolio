@@ -35,6 +35,18 @@ describe("walk", () => {
     expect(entries.map((e) => e.path)).toEqual([join(root, "other", "note.md")]);
     expect(generated).toContain(join(root, "MasterPortfolio-backup"));
   });
+
+  it("skips a MasterPortfolio program folder (extracted zip on the desktop)", async () => {
+    const root = await mkTmp();
+    await mkdir(join(root, "MasterPortfolio", "app", "dist"), { recursive: true });
+    await mkdir(join(root, "MasterPortfolio", "runtime"), { recursive: true });
+    await writeFile(join(root, "MasterPortfolio", "app", "dist", "cli.js"), "x");
+    await writeFile(join(root, "MasterPortfolio", "README.txt"), "x");
+    await writeFile(join(root, "note.md"), "x");
+    const { entries, generated } = await walk(root);
+    expect(entries.map((e) => e.path)).toEqual([join(root, "note.md")]);
+    expect(generated).toContain(join(root, "MasterPortfolio"));
+  });
 });
 
 describe("walk exclusions", () => {
