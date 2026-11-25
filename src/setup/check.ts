@@ -8,6 +8,29 @@ import { agentForStage } from "../agent/agents.js";
 
 const run = promisify(execFile);
 
+export type AgentProbe = { ok: true } | { ok: false; kind: string; label: string; fix: string };
+
+/**
+ * 에이전트 연결 확인: 분석 단계와 같은 설정(빠른 모델)으로 띄워 한 단어 답을 받는다(아주 적은 사용량).
+ * 로그인이 풀렸으면 kind="auth".
+ */
+export async function probeAgent(config: Awaited<ReturnType<typeof loadConfig>>): Promise<AgentProbe> {
+  const cfg = config.agents[config.agent] ? agentForStage(config, "triage") : null;
+  if (!cfg) return { ok: false, kind: "config", label: `에이전트 설정 없음: ${config.agent}`, fix: "`mp init`을 다시 실행하세요" };
+  const b = new AcpBridge(cfg);
+  try {
+    await b.start(); const s = await b.newSession();
+    const r = await b.prompt(s, "연결 확인입니다. 'OK' 한 단어로만 답하세요. 도구는 사용하지 마세요.", 120_000);
+    if (r.ok) return { ok: true };
+    return { ok: false, kind: r.kind, label: `에이전트 응답 오류 (${r.kind}): ${r.detail}`,
+      fix: r.kind === "auth" ? `${config.agent} CLI를 직접 실행해 로그인하세요` : "에이전트 CLI와 ACP 어댑터 설치를 확인하세요" };
+  } catch (e) {
+    const kind = e instanceof Error && "kind" in e ? String((e as { kind: unknown }).kind) : "crash";
+    return { ok: false, kind, label: `에이전트 실행 실패: ${e instanceof Error ? e.message : String(e)}`,
+      fix: `${cfg.command} ${cfg.args.join(" ")} 명령이 동작하는지 확인하세요 (Claude Code 설치·로그인 필요)` };
+  } finally { await b.stop(); }
+}
+
 export type CheckItem = { ok: boolean; label: string; fix?: string; warn?: boolean };
 
 /** 환경 점검 결과를 항목 목록으로 돌려준다(mp doctor와 화면 설정이 함께 쓴다). 문구는 doctor 출력과 같다 */
@@ -42,22 +65,9 @@ export async function checkEnvironment(out: string | null, opts: { skipAgent?: b
   }
 
   if (!opts.skipAgent) {
-    // 분석 단계와 같은 실행 설정(빠른 모델·이 PC에 없는 CLI 경로 제외)으로 점검한다
-    const cfg = config.agents[config.agent] ? agentForStage(config, "triage") : null;
-    if (!cfg) bad(`에이전트 설정 없음: ${config.agent}`, "`mp init`을 다시 실행하세요");
-    else {
-      const b = new AcpBridge(cfg);
-      try {
-        await b.start(); const s = await b.newSession();
-        const r = await b.prompt(s, "연결 확인입니다. 'OK' 한 단어로만 답하세요. 도구는 사용하지 마세요.", 120_000);
-        if (r.ok) ok(`에이전트 연결: ${config.agent}`);
-        else bad(`에이전트 응답 오류 (${r.kind}): ${r.detail}`,
-          r.kind === "auth" ? `${config.agent} CLI를 직접 실행해 로그인하세요` : "에이전트 CLI와 ACP 어댑터 설치를 확인하세요");
-      } catch (e) {
-        bad(`에이전트 실행 실패: ${e instanceof Error ? e.message : String(e)}`,
-          `${cfg.command} ${cfg.args.join(" ")} 명령이 동작하는지 확인하세요 (Claude Code 설치·로그인 필요)`);
-      } finally { await b.stop(); }
-    }
+    const r = await probeAgent(config);
+    if (r.ok) ok(`에이전트 연결: ${config.agent}`);
+    else bad(r.label, r.fix);
   }
   return items;
 }

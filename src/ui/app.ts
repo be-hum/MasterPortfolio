@@ -302,7 +302,7 @@ var DEFAULT_STATUSES = LIVE ? ["pending", "adopted"] : null;
 var DECISIONS = [["adopted", "채택"], ["held", "보류"], ["excluded", "제외"]];
 
 var S = {
-  exps: [], output: "", generatedAt: "", job: null, loading: LIVE, error: null, hints: null, hintsAsked: false, lastScan: null, staleClosed: false,
+  exps: [], output: "", generatedAt: "", job: null, loading: LIVE, error: null, hints: null, hintsAsked: false, lastScan: null, staleClosed: false, agent: null, agentChecking: false, agentClosed: false,
   view: "category", statuses: DEFAULT_STATUSES ? DEFAULT_STATUSES.slice() : null, contribs: [], q: "", todo: null,
   sel: null, open: null, order: [], activeG: null, checked: {}, skipped: {}, drafts: {},
   editing: false, form: null, form0: null, fileView: null, showLog: false, polling: false, menu: false
@@ -369,7 +369,7 @@ function load() {
     else {
       S.error = null; S.exps = r.json.experiences || []; S.output = r.json.output || ""; S.job = r.json.job || null; S.lastScan = r.json.lastScan || null;
       if (busy()) ensurePoll();
-      if (!S.hintsAsked) { S.hintsAsked = true; fetchHints(); }
+      if (!S.hintsAsked) { S.hintsAsked = true; fetchHints(); fetchAgent(false); }
     }
     renderPrint(); render();
     if (S.settings) renderSettings(); // 작업이 끝나면 저장·초기화 버튼을 다시 켠다
@@ -902,6 +902,16 @@ function fetchHints() {
     }
   }, function () { /* 제안은 없어도 된다 */ });
 }
+/** Claude 연결·로그인 확인(화면을 열 때 한 번, 로그인 문제로 작업이 실패하면 다시) */
+function fetchAgent(refresh) {
+  S.agentChecking = true; S.agentClosed = false; renderHints();
+  api("GET", "/api/agent-status" + (refresh ? "?refresh=1" : "")).then(function (r) {
+    S.agentChecking = false;
+    if (r.ok && r.json.agent) S.agent = r.json.agent;
+    renderHints();
+    if (refresh && S.agent && S.agent.ok) toast("Claude Code 연결 확인됨");
+  }, function () { S.agentChecking = false; renderHints(); });
+}
 /** add: 체크한 폴더는 추가, 나머지는 다시 묻지 않음. add=false: 모두 다시 묻지 않음 */
 function answerHints(add) {
   var list = S.hints || [];
@@ -928,8 +938,21 @@ function renderHints() {
   if (!H) return;
   var list = S.hints || [];
   var stale = staleDays();
-  H.hidden = !list.length && stale === null;
+  H.hidden = !list.length && stale === null && !(S.agent && !S.agent.ok && !S.agentClosed);
   clear(H);
+  var ag = S.agent && !S.agent.ok && !S.agentClosed ? S.agent : null;
+  if (ag) {
+    var auth = ag.kind === "auth";
+    H.appendChild(el("p", {}, [
+      el("strong", { text: auth ? "Claude Code 로그인이 필요합니다." : "Claude Code에 연결하지 못했습니다." }),
+      " " + (auth ? "새 터미널(명령 프롬프트)에서 claude 를 실행해 로그인한 뒤 [다시 확인]을 누르세요. 그전에는 스캔·묶기·반영이 멈춥니다."
+        : (ag.fix || "") + " — " + ag.label)
+    ]));
+    H.appendChild(el("div", { class: "hb-btns" }, [
+      el("button", { type: "button", class: "btn sm primary", "data-k": "agent:recheck", disabled: S.agentChecking, onclick: function () { fetchAgent(true); }, text: S.agentChecking ? "확인 중…" : "다시 확인" }),
+      el("button", { type: "button", class: "btn sm ghost", "data-k": "agent:close", onclick: function () { S.agentClosed = true; renderHints(); }, text: "닫기" })
+    ]));
+  }
   if (stale !== null) {
     H.appendChild(el("p", {}, [el("strong", { text: stale < 0 ? "아직 스캔한 적이 없습니다." : "마지막 스캔이 " + stale + "일 전입니다." }), " 그사이 새로 생긴 과제·발표 자료가 있을 수 있습니다."]));
     H.appendChild(el("div", { class: "hb-btns" }, [
@@ -999,6 +1022,7 @@ function tick() {
     else if (S.job) {
       var okd = S.job.code === 0;
       notifyDone(JOB_LABEL[S.job.kind] + (okd ? " 완료" : " 실패") + (S.job.summary ? " — " + S.job.summary : ""), okd);
+      if (!okd && /로그인 필요/.test(S.job.summary || "")) fetchAgent(true);
       toast(JOB_LABEL[S.job.kind] + (okd ? " 완료" + (S.job.summary ? " — " + S.job.summary : "") : " 실패(코드 " + S.job.code + ") — " + (S.job.summary || "로그를 확인하세요")), okd ? null : "err");
       if (!okd) S.showLog = true;
     }

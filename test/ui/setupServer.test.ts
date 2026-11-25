@@ -34,7 +34,7 @@ describe("setup mode (11.6)", () => {
   it("blocks data/job/settings routes with 409 and reports setup:true", async () => {
     const { call } = await boot(null);
     expect((await call("GET", "/api/state")).json).toEqual({ ok: true, setup: true });
-    for (const [m, p] of [["GET", "/api/job"], ["POST", "/api/job"], ["POST", "/api/job/stop"], ["GET", "/api/folder-hints"], ["POST", "/api/folder-hints"], ["POST", "/api/decide"], ["GET", "/api/settings"], ["POST", "/api/settings"], ["POST", "/api/settings/scope-reset"], ["GET", "/files/x.md"]] as const) {
+    for (const [m, p] of [["GET", "/api/job"], ["POST", "/api/job"], ["POST", "/api/job/stop"], ["GET", "/api/folder-hints"], ["GET", "/api/agent-status"], ["POST", "/api/folder-hints"], ["POST", "/api/decide"], ["GET", "/api/settings"], ["POST", "/api/settings"], ["POST", "/api/settings/scope-reset"], ["GET", "/files/x.md"]] as const) {
       const r = await call(m, p, m === "POST" ? {} : undefined);
       expect([p, r.status, r.json?.error]).toEqual([p, 409, "처음 설정이 필요합니다."]);
     }
@@ -217,6 +217,22 @@ describe("settings API (11.6)", () => {
     expect(c.dismissedFolders).toEqual([B]);
     expect((await call("GET", "/api/folder-hints")).json.folders).toEqual([]);
     expect(calls).toBe(1);
+  });
+
+  it("agent status: probed once and cached; refresh=1 probes again", async () => {
+    const scan = await tmp(), out = await tmp();
+    const { createSetupConfig } = await import("../../src/setup/config.js");
+    process.env.MP_POINTER_FILE = join(await tmp(), "p.json");
+    await createSetupConfig({ university: "", keywords: [], folders: [scan], planScale: 1, output: out });
+    let n = 0;
+    const srv = await startUiServer({ out, token: TOKEN, cliPath: "unused.js", html: () => "x", setupDeps: { probe: async () => (++n === 1 ? { ok: false, kind: "auth", label: "x", fix: "y" } : { ok: true }) } });
+    closers.push(srv.close);
+    const get = async (p: string) => (await (await fetch(`http://127.0.0.1:${srv.port}${p}`, { headers: { "x-mp-token": TOKEN } })).json()).agent;
+    expect(await get("/api/agent-status")).toMatchObject({ ok: false, kind: "auth" });
+    expect(await get("/api/agent-status")).toMatchObject({ ok: false, kind: "auth" });
+    expect(n).toBe(1);
+    expect(await get("/api/agent-status?refresh=1")).toEqual({ ok: true });
+    expect(n).toBe(2);
   });
 
   it("scope-reset removes the path and its children only", async () => {

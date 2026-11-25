@@ -14,7 +14,7 @@ import { buildUiState, loadFileTitles } from "./model.js";
 import { suggestFolders, defaultOutputDir } from "../setup/folders.js";
 import { createSetupConfig, normalizeFolderInput, validateSetup, SetupError } from "../setup/config.js";
 import { pathKey } from "../core/paths.js";
-import { checkEnvironment } from "../setup/check.js";
+import { checkEnvironment, probeAgent, type AgentProbe } from "../setup/check.js";
 import { pickFolder, PickUnavailable } from "../setup/pickFolder.js";
 import { expandUniversity } from "../discovery/universities.js";
 import { resetScopeDecisions } from "../discovery/scopeDecisions.js";
@@ -27,6 +27,8 @@ export type SetupDeps = {
   create?: typeof createSetupConfig; defaultOutput?: () => Promise<string>;
   /** 화면을 열 때 알릴 새 폴더(기본: Windows에서 WSL 홈 안의 자료 폴더) */
   folderHints?: (keywords: string[]) => Promise<FolderHint[]>;
+  /** 에이전트(Claude) 연결·로그인 확인 */
+  probe?: (config: Awaited<ReturnType<typeof loadConfig>>) => Promise<AgentProbe>;
 };
 export type FolderHint = { path: string; label: string; kind?: string };
 /** 화면을 열 때 알릴 폴더: 클라우드(OneDrive 등)·다른 드라이브·WSL. 이름 검색(느림)은 하지 않는다 */
@@ -208,6 +210,9 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     return list.filter((h) => !have.has(hintKey(h.path)));
   };
 
+  // 에이전트 연결 확인: 화면을 열 때 한 번(실패했으면 [다시 확인]으로 다시). 작업 중에는 확인하지 않는다
+  let probeCache: Promise<AgentProbe> | null = null;
+
   const SETUP_OPEN = new Set(["/api/setup", "/api/setup/suggest", "/api/pick-folder", "/api/check", "/api/shutdown"]);
   const busyErr = () => new HttpError(409, "작업 실행 중에는 수정할 수 없습니다. 끝난 뒤 다시 시도하세요.");
 
@@ -266,6 +271,16 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     if (path === "/api/folder-hints" && method === "GET") {
       const c = await loadConfig(cur());
       return send(res, 200, { ok: true, folders: newHints(await hints(c.university.keywords), c) });
+    }
+    if (path === "/api/agent-status" && method === "GET") {
+      const dir = cur();
+      const refresh = new URL(req.url ?? "/", "http://localhost").searchParams.get("refresh") === "1";
+      if (job?.running && !probeCache) return send(res, 200, { ok: true, agent: null });
+      if (!probeCache || refresh) {
+        const c = await loadConfig(dir);
+        probeCache = (sd.probe ?? probeAgent)(c).catch((e) => ({ ok: false as const, kind: "crash", label: e instanceof Error ? e.message : String(e), fix: "" }));
+      }
+      return send(res, 200, { ok: true, agent: await probeCache });
     }
     if (path === "/api/settings" && method === "GET") {
       const dir = cur();
