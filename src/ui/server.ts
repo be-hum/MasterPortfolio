@@ -207,8 +207,10 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
   /** \\wsl$\ 와 \\wsl.localhost\ 는 같은 곳 */
   const hintKey = (p: string) => pathKey(p.replace(/^\\\\wsl\$\\/i, "\\\\wsl.localhost\\"));
   const newHints = (list: FolderHint[], c: { scanFolders: string[]; dismissedFolders: string[] }) => {
-    const have = new Set([...c.scanFolders, ...c.dismissedFolders].map(hintKey));
-    return list.filter((h) => !have.has(hintKey(h.path)));
+    // 이미 스캔하는 폴더 안에 있는 제안은 뺀다(같은 곳을 두 번 훑지 않게). 다시 묻지 않기로 한 폴더는 그 경로만
+    const roots = c.scanFolders.map(hintKey);
+    const dismissed = new Set(c.dismissedFolders.map(hintKey));
+    return list.filter((h) => { const k = hintKey(h.path); return !dismissed.has(k) && !roots.some((r) => k === r || k.startsWith(r.endsWith("/") ? r : r + "/")); });
   };
 
   // 에이전트 연결 확인: 화면을 열 때 한 번(실패했으면 [다시 확인]으로 다시). 작업 중에는 확인하지 않는다

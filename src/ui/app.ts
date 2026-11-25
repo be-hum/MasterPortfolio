@@ -107,7 +107,9 @@ button:disabled{cursor:not-allowed;opacity:.5}
 .topbar .btn{margin-left:auto}
 
 /* 일괄 결정 */
-.hintbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 8px;padding:10px 12px;background:var(--warn-bg);color:var(--warn-ink);border-radius:10px;font-size:13px}
+.hintbar{display:grid;gap:10px;margin:0 0 8px;padding:10px 12px;background:var(--warn-bg);color:var(--warn-ink);border-radius:10px;font-size:13px}
+.hb-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.hb-row+.hb-row{border-top:1px solid color-mix(in srgb,currentColor 18%,transparent);padding-top:10px}
 .hintbar p{margin:0;flex:1 1 280px}
 .hintbar .hb-main{flex:1 1 320px;min-width:0}
 .hintbar .hb-items{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
@@ -936,8 +938,15 @@ function staleDays() {
 function renderHints() {
   var H = $("hintbar");
   if (!H) return;
-  fillHints(H);
-  H.hidden = !H.childNodes.length;
+  // 안내마다 [설명, 버튼] 두 요소를 만들고, 한 안내를 한 줄(hb-row)로 묶는다
+  var tmp = el("div", {});
+  fillHints(tmp);
+  var kids = Array.prototype.slice.call(tmp.childNodes);
+  keepFocus(function () {
+    clear(H);
+    for (var i = 0; i < kids.length; i += 2) H.appendChild(el("div", { class: "hb-row" }, [kids[i], kids[i + 1] || null]));
+  });
+  H.hidden = !kids.length;
 }
 function fillHints(H) {
   var list = S.hints || [];

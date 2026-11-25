@@ -5,7 +5,7 @@ import { mkTmp } from "../helpers/tmp.js";
 import { startUiServer, type SetupDeps } from "../../src/ui/server.js";
 import { PickUnavailable } from "../../src/setup/pickFolder.js";
 import { loadConfig, saveConfig } from "../../src/config/config.js";
-import { resolveOutputDir } from "../../src/core/paths.js";
+import { normalizePath, resolveOutputDir } from "../../src/core/paths.js";
 
 const TOKEN = "t".repeat(64);
 const dirs: string[] = [];
@@ -204,8 +204,9 @@ describe("settings API (11.6)", () => {
     await createSetupConfig({ university: "연세대", keywords: ["연세대"], folders: [scan], planScale: 1, output: out });
     const A = "\\\\wsl.localhost\\U\\home\\a\\projects", B = "\\\\wsl.localhost\\U\\home\\a\\portfolio", C = "\\\\wsl.localhost\\U\\home\\a\\dev";
     const c0 = await loadConfig(out); c0.scanFolders.push("\\\\wsl$\\U\\home\\a\\dev"); await saveConfig(out, c0); // 별칭으로 이미 있음
+    const D = "\\\\wsl.localhost\\U\\home\\a\\dev\\sub"; // 이미 스캔하는 폴더 안
     let calls = 0; let kw: string[] = [];
-    const srv = await startUiServer({ out, token: TOKEN, cliPath: "unused.js", html: () => "x", setupDeps: { folderHints: async (k) => { calls++; kw = k; return [A, B, C].map((path) => ({ path, label: path })); } } });
+    const srv = await startUiServer({ out, token: TOKEN, cliPath: "unused.js", html: () => "x", setupDeps: { folderHints: async (k) => { calls++; kw = k; return [A, B, C, D].map((path) => ({ path, label: path })); } } });
     closers.push(srv.close);
     const call = async (m: string, p: string, body?: unknown) => { const r = await fetch(`http://127.0.0.1:${srv.port}${p}`, { method: m, headers: { "x-mp-token": TOKEN }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: r.status, json: await r.json() }; };
     expect((await call("GET", "/api/folder-hints")).json.folders.map((f: any) => f.path)).toEqual([A, B]);
@@ -247,7 +248,7 @@ describe("settings API (11.6)", () => {
     expect((await call("POST", "/api/scope-answer", { path: join(scan, "nope"), decision: "include" })).status).toBe(404);
     expect((await call("POST", "/api/scope-answer", { path: join(scan, "q1"), decision: "exclude" })).json).toEqual({ ok: true, left: 2 });
     const c2 = await loadConfig(out);
-    expect(c2.scope.decisions[join(scan, "q1")]).toMatchObject({ decision: "exclude", by: "user" });
+    expect(c2.scope.decisions[normalizePath(join(scan, "q1"))]).toMatchObject({ decision: "exclude", by: "user" });
     expect(Object.keys(c2.scope.questions)).toHaveLength(2);
     await call("POST", "/api/settings/scope-reset", { path: join(scan, "z") });
     expect(Object.keys((await loadConfig(out)).scope.questions)).toEqual([join(scan, "q2")]);
