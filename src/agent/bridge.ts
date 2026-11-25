@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -112,7 +112,8 @@ export class AcpBridge {
   }
 
   async start(): Promise<void> {
-    this.workDir = await mkdtemp(join(tmpdir(), "mp-agent-"));
+    // 실제 경로로: macOS의 /var는 /private/var 링크라, 에이전트가 보는 cwd와 session/new의 cwd가 어긋나지 않게
+    this.workDir = await realpath(await mkdtemp(join(tmpdir(), "mp-agent-")));
     this.opts.log?.(`[workdir] ${this.workDir}`);
     const plan = resolveSpawn(this.cfg.command, this.cfg.args);
     const proc = spawn(plan.file, plan.args, {
