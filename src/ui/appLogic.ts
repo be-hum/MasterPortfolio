@@ -121,6 +121,100 @@ function starText(e) {
 function splitList(s, sep) {
   return (s || "").split(sep || ",").map(function (x) { return x.trim(); }).filter(Boolean);
 }
+
+/* ---------- 처음 설정·설정 화면 (11.6) ---------- */
+var PLANS = [[1, "Pro"], [5, "Max 5x"], [20, "Max 20x"]];
+/** 폴더 제안 묶음: 직접 추가가 맨 위, 다음 기본·클라우드·드라이브·이름이 맞는 폴더 */
+var FOLDER_GROUPS = [
+  ["manual", "직접 추가한 폴더", ["manual"]],
+  ["base", "기본 폴더", ["documents", "downloads", "desktop"]],
+  ["cloud", "클라우드 폴더", ["cloud"]],
+  ["drive", "다른 드라이브", ["drive"]],
+  ["keyword", "이름이 맞는 폴더", ["keyword"]]
+];
+/** 경로 비교 키: 끝 구분자 제거, Windows 경로(드라이브 문자·역슬래시)는 대소문자 무시 */
+function folderKey(p) {
+  var s = String(p || "").trim().replace(/[\\/]+$/, "");
+  return /^[A-Za-z]:|\\/.test(s) ? s.replace(/\//g, "\\").toLowerCase() : s;
+}
+/** 목록에 폴더 추가: 맨 위에 체크된 상태로(이미 있으면 맨 위로 옮겨 체크). 빈 경로면 그대로 */
+function addFolderTo(list, path) {
+  var p = String(path || "").trim();
+  if (!p) return list.slice();
+  var k = folderKey(p), old = null;
+  var rest = list.filter(function (f) { if (folderKey(f.path) === k) { old = f; return false; } return true; });
+  var item = old ? { path: old.path, label: old.label, kind: old.kind, checked: true } : { path: p, label: p, kind: "manual", checked: true };
+  return [item].concat(rest);
+}
+/** 새 제안을 기존 목록에 합친다: 기존 항목(직접 추가·체크 상태)은 그대로, 새 경로만 제안 순서대로 뒤에 */
+function mergeFolders(list, sugg) {
+  var have = {};
+  list.forEach(function (f) { have[folderKey(f.path)] = 1; });
+  var add = (sugg || []).filter(function (f) { var k = folderKey(f.path); if (have[k]) return false; have[k] = 1; return true; })
+    .map(function (f) { return { path: f.path, label: f.label, kind: f.kind, checked: !!f.checked }; });
+  return list.concat(add);
+}
+/** 종류별 묶음(빈 묶음은 뺀다). 알 수 없는 종류는 직접 추가로 */
+function groupFolders(list) {
+  return FOLDER_GROUPS.map(function (g) {
+    return { key: g[0], label: g[1], items: list.filter(function (f) {
+      var kind = FOLDER_GROUPS.some(function (x) { return x[2].indexOf(f.kind) >= 0; }) ? f.kind : "manual";
+      return g[2].indexOf(kind) >= 0;
+    }) };
+  }).filter(function (g) { return g.items.length; });
+}
+/** 아직 목록에 없는 제안만 */
+function newSuggestions(sugg, paths) {
+  var have = {};
+  (paths || []).forEach(function (p) { have[folderKey(p)] = 1; });
+  return (sugg || []).filter(function (f) { return !have[folderKey(f.path)]; });
+}
+/** 마법사 단계 검사: 문제 문구 목록(빈 배열 = 다음으로 갈 수 있음). 1단계는 건너뛸 수 있어 늘 통과 */
+function wizardErrors(step, w) {
+  var e = [];
+  if (step === 2 && !w.folders.some(function (f) { return f.checked; })) e.push("스캔할 폴더를 하나 이상 고르세요");
+  if (step === 3) {
+    if (!String(w.output || "").trim()) e.push("결과 폴더를 입력하세요");
+    if ([1, 5, 20].indexOf(w.planScale) < 0) e.push("요금제를 고르세요");
+  }
+  return e;
+}
+/** 처음 설정 저장 본문 */
+function setupPayload(w) {
+  return {
+    university: String(w.university || "").trim(),
+    keywords: w.keywords.filter(function (k) { return k.checked; }).map(function (k) { return k.text; }),
+    folders: w.folders.filter(function (f) { return f.checked; }).map(function (f) { return f.path; }),
+    planScale: w.planScale, output: String(w.output || "").trim()
+  };
+}
+/** 예산 비율 % 입력 → 0.05~1 (숫자가 아니면 null) */
+function pctToShare(v) {
+  var n = Number(String(v).trim());
+  if (String(v).trim() === "" || !isFinite(n)) return null;
+  return Math.round(Math.min(100, Math.max(5, n))) / 100;
+}
+/** 설정 저장 본문: 바뀐 필드만(scanFolders는 보낼 때마다 존재를 다시 검사하므로 그대로면 빼기) */
+function settingsDiff(cur, base) {
+  var out = {};
+  if (JSON.stringify(cur.scanFolders) !== JSON.stringify(base.scanFolders)) out.scanFolders = cur.scanFolders.slice();
+  if (cur.planScale !== base.planScale) out.planScale = cur.planScale;
+  if (cur.fiveHourShare !== base.fiveHourShare) out.fiveHourShare = cur.fiveHourShare;
+  var k = splitList(cur.keywords), k0 = splitList(base.keywords);
+  if (JSON.stringify(k) !== JSON.stringify(k0)) out.keywords = k;
+  return out;
+}
+/** 폴더 범위 판단 표 검색: 경로·포함/제외·판단 주체에서 찾고 경로순 */
+var SCOPE_LABEL = { include: "포함", exclude: "제외", llm: "LLM", user: "사용자" };
+function filterScope(rows, q) {
+  var words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  return rows.filter(function (r) {
+    var h = [r.path, SCOPE_LABEL[r.decision] || r.decision, SCOPE_LABEL[r.by] || r.by, r.at].join(" ").toLowerCase();
+    return words.every(function (w) { return h.indexOf(w) >= 0; });
+  }).sort(function (a, b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; });
+}
+/** 점검 항목 표시: ok ✔, warn !, 그 밖은 ✘ */
+function checkMark(it) { return it.ok ? "ok" : it.warn ? "warn" : "fail"; }
 `;
 
 export type Filter = { statuses: string[] | null; contribs: string[]; category: string | null; q: string; todo: "decide" | "answer" | "apply" | null };
@@ -139,8 +233,23 @@ export interface AppLogic {
   oneLine(e: UiExperience): string;
   starText(e: UiExperience): string;
   splitList(s: string, sep?: string): string[];
+  folderKey(p: string): string;
+  addFolderTo(list: WizFolder[], path: string): WizFolder[];
+  mergeFolders(list: WizFolder[], sugg: WizFolder[]): WizFolder[];
+  groupFolders(list: WizFolder[]): { key: string; label: string; items: WizFolder[] }[];
+  newSuggestions(sugg: WizFolder[], paths: string[]): WizFolder[];
+  wizardErrors(step: number, w: { folders: WizFolder[]; output: string; planScale: number }): string[];
+  setupPayload(w: { university: string; keywords: { text: string; checked: boolean }[]; folders: WizFolder[]; planScale: number; output: string }): { university: string; keywords: string[]; folders: string[]; planScale: number; output: string };
+  pctToShare(v: string | number): number | null;
+  settingsDiff(cur: SettingsForm, base: SettingsForm): Partial<{ scanFolders: string[]; planScale: number; fiveHourShare: number; keywords: string[] }>;
+  filterScope(rows: ScopeRow[], q: string): ScopeRow[];
+  checkMark(it: { ok: boolean; warn?: boolean }): "ok" | "warn" | "fail";
 }
-const EXPORTS = ["endOf", "yearOf", "inTodo", "todoCounts", "matchText", "filterList", "groupList", "countBy", "chipsOf", "outMark", "oneLine", "starText", "splitList"];
+export type WizFolder = { path: string; label: string; kind: string; checked: boolean };
+export type SettingsForm = { scanFolders: string[]; planScale: number; fiveHourShare: number; keywords: string };
+export type ScopeRow = { path: string; decision: string; by: string; at: string };
+const EXPORTS = ["endOf", "yearOf", "inTodo", "todoCounts", "matchText", "filterList", "groupList", "countBy", "chipsOf", "outMark", "oneLine", "starText", "splitList",
+  "folderKey", "addFolderTo", "mergeFolders", "groupFolders", "newSuggestions", "wizardErrors", "setupPayload", "pctToShare", "settingsDiff", "filterScope", "checkMark"];
 
 /** 테스트용: 브라우저에 넣는 문자열을 그대로 평가한다 */
 export function loadLogic(): AppLogic {

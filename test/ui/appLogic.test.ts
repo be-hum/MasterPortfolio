@@ -74,3 +74,58 @@ describe("app logic (11.5)", () => {
     expect(L.splitList("x, y\nz", "\n")).toEqual(["x, y", "z"]);
   });
 });
+
+describe("setup & settings logic (11.6)", () => {
+  const F = (path: string, kind = "documents", checked = true) => ({ path, label: path, kind, checked });
+
+  it("addFolderTo puts a new folder on top checked; existing one moves to top and gets checked", () => {
+    const list = [F("/a"), F("/b", "keyword", false)];
+    expect(L.addFolderTo(list, " /c ").map((f) => [f.path, f.kind, f.checked])).toEqual([["/c", "manual", true], ["/a", "documents", true], ["/b", "keyword", false]]);
+    expect(L.addFolderTo(list, "/b/").map((f) => [f.path, f.kind, f.checked])).toEqual([["/b", "keyword", true], ["/a", "documents", true]]);
+    expect(L.addFolderTo([F("C:\\Users\\A")], "c:/users/a")).toHaveLength(1);
+    expect(L.addFolderTo(list, "  ")).toEqual(list);
+  });
+
+  it("mergeFolders keeps user state and appends only new suggestions", () => {
+    const list = [F("/m", "manual"), F("/a", "documents", false)];
+    const merged = L.mergeFolders(list, [F("/a"), F("/k", "keyword", false), F("/k", "keyword")]);
+    expect(merged.map((f) => [f.path, f.checked])).toEqual([["/m", true], ["/a", false], ["/k", false]]);
+  });
+
+  it("groupFolders orders groups (manual, base, cloud, drive, keyword) and drops empty ones", () => {
+    const g = L.groupFolders([F("/k", "keyword"), F("/d", "desktop"), F("/x", "weird"), F("/o", "cloud"), F("/dl", "downloads")]);
+    expect(g.map((x) => [x.key, x.items.map((i) => i.path)])).toEqual([["manual", ["/x"]], ["base", ["/d", "/dl"]], ["cloud", ["/o"]], ["keyword", ["/k"]]]);
+    expect(L.newSuggestions([F("/a"), F("/b")], ["/a/"]).map((f) => f.path)).toEqual(["/b"]);
+  });
+
+  it("wizardErrors and setupPayload", () => {
+    const w = { university: " 연세대 ", keywords: [{ text: "연세대", checked: true }, { text: "Yonsei", checked: false }], folders: [F("/a", "documents", false)], planScale: 5, output: "" };
+    expect(L.wizardErrors(1, w)).toEqual([]);
+    expect(L.wizardErrors(2, w)).toEqual(["스캔할 폴더를 하나 이상 고르세요"]);
+    expect(L.wizardErrors(3, w)).toEqual(["결과 폴더를 입력하세요"]);
+    expect(L.wizardErrors(3, { ...w, output: "/o", planScale: 3 })).toEqual(["요금제를 고르세요"]);
+    w.folders.push(F("/b"));
+    expect(L.wizardErrors(2, w)).toEqual([]);
+    expect(L.setupPayload({ ...w, output: " /o " })).toEqual({ university: "연세대", keywords: ["연세대"], folders: ["/b"], planScale: 5, output: "/o" });
+  });
+
+  it("pctToShare clamps to 5–100% and settingsDiff sends only changed fields", () => {
+    expect([L.pctToShare("30"), L.pctToShare(1), L.pctToShare("250"), L.pctToShare(""), L.pctToShare("x")]).toEqual([0.3, 0.05, 1, null, null]);
+    const base = { scanFolders: ["/a"], planScale: 1, fiveHourShare: 0.3, keywords: "연세대, Yonsei" };
+    expect(L.settingsDiff({ ...base, keywords: "연세대 ,Yonsei" }, base)).toEqual({});
+    expect(L.settingsDiff({ ...base, planScale: 5, fiveHourShare: 0.5 }, base)).toEqual({ planScale: 5, fiveHourShare: 0.5 });
+    expect(L.settingsDiff({ ...base, scanFolders: ["/a", "/b"], keywords: "연세대" }, base)).toEqual({ scanFolders: ["/a", "/b"], keywords: ["연세대"] });
+  });
+
+  it("filterScope searches path and Korean labels, sorted by path; checkMark", () => {
+    const rows = [
+      { path: "/z/proj", decision: "include", by: "llm", at: "2026-11-20" },
+      { path: "/a/games", decision: "exclude", by: "user", at: "2026-11-21" },
+    ];
+    expect(L.filterScope(rows, "").map((r) => r.path)).toEqual(["/a/games", "/z/proj"]);
+    expect(L.filterScope(rows, "제외").map((r) => r.path)).toEqual(["/a/games"]);
+    expect(L.filterScope(rows, "llm 포함").map((r) => r.path)).toEqual(["/z/proj"]);
+    expect(L.filterScope(rows, "PROJ").map((r) => r.path)).toEqual(["/z/proj"]);
+    expect([L.checkMark({ ok: true }), L.checkMark({ ok: false, warn: true }), L.checkMark({ ok: false })]).toEqual(["ok", "warn", "fail"]);
+  });
+});

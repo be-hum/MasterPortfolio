@@ -1,4 +1,5 @@
 import { LOGIC_JS } from "./appLogic.js";
+import { SETUP_CSS, SETUP_JS } from "./appSetup.js";
 import type { UiExperience } from "./model.js";
 
 export type AppOptions = { mode: "live"; token: string } | { mode: "static"; data: UiExperience[]; generatedAt: string };
@@ -358,6 +359,7 @@ function load() {
   return api("GET", "/api/state").then(function (r) {
     S.loading = false;
     if (!r.ok) S.error = errMsg(r);
+    else if (r.json.setup) { enterSetup(); return; }
     else {
       S.error = null; S.exps = r.json.experiences || []; S.output = r.json.output || ""; S.job = r.json.job || null;
       if (busy()) ensurePoll();
@@ -367,16 +369,11 @@ function load() {
 }
 
 /* ---------- 렌더 ---------- */
-function render() {
+/** 다시 그린 뒤에도 같은 data-k 요소에 포커스·커서를 되돌린다 */
+function keepFocus(fn) {
   var ae = document.activeElement, fk = ae && ae.getAttribute ? ae.getAttribute("data-k") : null;
   var caret = fk && ae.value !== undefined && typeof ae.selectionStart === "number" ? [ae.selectionStart, ae.selectionEnd] : null;
-  var vis = filterList(S.exps, filt());
-  var groups = groupList(vis, S.view);
-  S.order = [];
-  groups.forEach(function (g) { g.items.forEach(function (e) { S.order.push(e.rel); }); });
-  if (S.activeG && !groups.some(function (g) { return g.key === S.activeG; })) S.activeG = null;
-  renderSide(groups); renderTop(vis); renderBulk(vis); renderList(groups); renderPanel(); renderJob();
-  $("app").classList.toggle("panel-open", !!S.open);
+  fn();
   if (fk) {
     var n = document.querySelector('[data-k="' + cssq(fk) + '"]');
     if (n && n !== document.activeElement) {
@@ -384,6 +381,17 @@ function render() {
       if (caret && n.setSelectionRange) try { n.setSelectionRange(caret[0], caret[1]); } catch (e) { /* type=number 등 */ }
     }
   }
+}
+function render() {
+  keepFocus(function () {
+    var vis = filterList(S.exps, filt());
+    var groups = groupList(vis, S.view);
+    S.order = [];
+    groups.forEach(function (g) { g.items.forEach(function (e) { S.order.push(e.rel); }); });
+    if (S.activeG && !groups.some(function (g) { return g.key === S.activeG; })) S.activeG = null;
+    renderSide(groups); renderTop(vis); renderBulk(vis); renderList(groups); renderPanel(); renderJob();
+    $("app").classList.toggle("panel-open", !!S.open);
+  });
   markToc(); observe();
 }
 
@@ -448,6 +456,7 @@ function renderSide(groups) {
       S.contribs.indexOf(k) >= 0, function () { toggleContrib(k); }, CONTRIB_HELP[k] || "수행 방식을 아직 정하지 않음");
   }))]));
 
+  if (LIVE) sb.appendChild(el("button", { type: "button", class: "btn side-set", "data-k": "settings", "aria-haspopup": "dialog", title: "스캔 폴더·요금제·폴더 범위 판단·환경 점검", onclick: openSettings, text: "⚙ 설정" }));
   if (LIVE && S.output) sb.appendChild(el("p", { class: "side-foot", text: "결과 폴더 · " + S.output }));
   else if (!LIVE) sb.appendChild(el("p", { class: "side-foot", text: "내 PC에만 저장된 파일입니다. 수정은 experiences/의 경험 카드에서 한 뒤 mp master를 다시 실행하세요." }));
 }
@@ -977,6 +986,9 @@ function editable(t) { return t && (t.tagName === "INPUT" || t.tagName === "TEXT
 document.addEventListener("keydown", function (ev) {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   var t = ev.target;
+  // 처음 설정·설정 화면이 열려 있으면 목록 단축키를 쓰지 않는다
+  if (S.setup) return;
+  if (S.settings) { if (ev.key === "Escape") settingsEsc(ev); return; }
   if (ev.key === "Escape") {
     if (editable(t)) { t.blur(); return; }
     if (S.fileView) { S.fileView = null; render(); return; }
@@ -1029,7 +1041,7 @@ export function renderApp(o: AppOptions): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>Master Record</title>
-<style>${CSS}</style>
+<style>${CSS}${live ? SETUP_CSS : ""}</style>
 </head>
 <body>
 <div class="app" id="app">
@@ -1052,12 +1064,12 @@ export function renderApp(o: AppOptions): string {
 </main>
 <aside class="panel" id="panel" aria-label="경험 상세" aria-hidden="true"></aside>
 ${live ? `<div class="jobbar" id="jobbar" hidden></div>\n` : ""}</div>
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
+${live ? `<div class="setup" id="setup" hidden></div>\n<div class="overlay" id="settings" role="dialog" aria-modal="true" aria-labelledby="set-title" hidden></div>\n` : ""}<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div id="printdoc"></div>
 ${data}<script>
 (function () {
 "use strict";
-${head}${LOGIC_JS}${APP_JS}
+${head}${LOGIC_JS}${live ? SETUP_JS : ""}${APP_JS}
 })();
 </script>
 </body>

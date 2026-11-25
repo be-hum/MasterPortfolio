@@ -50,4 +50,22 @@ describe("renderApp (11.5)", () => {
     expect(live).toContain('id="jobbar"');
     expect(html).not.toContain('id="jobbar"');
   });
+
+  it("live includes the setup wizard and settings (11.6); static does not", () => {
+    const live = renderApp({ mode: "live", token: "abc123" });
+    const [s] = scripts(live);
+    expect(() => new Function(s)).not.toThrow();
+    expect(s).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+    expect(s).not.toMatch(/\b(alert|confirm|prompt)\(/);
+    expect(live).toContain('id="setup"');
+    expect(live).toContain('id="settings"');
+    for (const p of ["/api/setup", "/api/setup/suggest?university=", "/api/pick-folder", "/api/check", "/api/settings", "/api/settings/scope-reset"]) expect(s).toContain(p);
+    expect(live).not.toMatch(/https?:\/\//);
+    expect(live.match(/<\/script>/g)).toHaveLength(1);
+    expect(html).not.toContain('id="setup"');
+    expect(html).not.toContain('id="settings"');
+    expect(html).not.toContain("/api/setup");
+    expect(html).not.toContain(".overlay");
+    expect(scripts(html)[0]).not.toMatch(/\b(alert|confirm|prompt)\(/);
+  });
 });
