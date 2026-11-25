@@ -210,12 +210,16 @@ details summary{cursor:pointer;font-size:12.5px;color:var(--ink-2)}
 /* 작업 바 */
 .jobbar{position:fixed;left:240px;right:0;bottom:0;z-index:20;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 28px;background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(8px);border-top:1px solid var(--line);transition:right .2s ease}
 .jobbar[hidden]{display:none}
-.jb-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0;font-size:13px}
+.jb-left{display:flex;align-items:center;gap:10px;flex:1 1 460px;min-width:0;font-size:13px}
+.jb-left>strong,.jb-left .linklike{white-space:nowrap;flex:none}
 .jb-left strong{font-variant-numeric:tabular-nums}
 .jb-line{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-3);font:12px ui-monospace,monospace}
 .jb-last{font-size:12px}
 .jb-last.ok{color:var(--ok)}.jb-last.err{color:var(--danger)}
 .jb-right{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.jb-bar{display:inline-block;width:160px;height:8px;border-radius:99px;background:var(--surface-2,#e9ecf1);overflow:hidden;vertical-align:middle;flex:none}
+.jb-fill{display:block;height:100%;border-radius:99px;background:var(--accent,#2d5bd7);transition:width .4s ease}
+.jb-prog{font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .jb-sep{width:1px;align-self:stretch;background:var(--line,#d0d5dc);margin:2px 4px}
 .bye{max-width:520px;margin:18vh auto;padding:0 16px;text-align:center}.bye h1{font-size:22px;margin:0 0 8px}
 .jb-log{order:-1;flex-basis:100%;max-height:200px;overflow:auto;margin:0;padding:10px 12px;border-radius:8px;background:var(--surface-2);font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink-2)}
@@ -275,6 +279,14 @@ var CONTRIB_HELP = {
   "개념 해석": "본인은 개념·설계 해석을 맡고 구현은 AI·타인이 수행"
 };
 var FIELD_LABEL = { role: "역할", period: "기간", contribution: "수행 방식", org: "소속", team_size: "팀 규모", skills: "기술", metrics: "성과", title: "제목", category: "분류" };
+var STAGE_LABEL = { scope: "폴더 범위", "judge-pending": "이전 카드 판정", triage: "선별", extract: "카드 추출", judge: "판정", group: "경험 묶기", review: "반영", keywords: "키워드" };
+function progressText(p) {
+  var parts = [(STAGE_LABEL[p.stage] || p.stage) + " " + p.done + "/" + p.total];
+  if (p.overall !== null && p.overall !== undefined) parts.push("전체 " + Math.round(p.overall * 100) + "%");
+  if (p.etaSec !== null && p.etaSec !== undefined) parts.push(p.etaSec < 60 ? "1분 안에 끝남" : "약 " + Math.round(p.etaSec / 60) + "분 남음");
+  else if (p.overall !== null && p.overall !== undefined && p.overall < 1) parts.push("남은 시간 계산 중");
+  return parts.join(" · ");
+}
 var JOB_LABEL = { scan: "새 자료 스캔", group: "경험 묶기", apply: "반영 실행", keywords: "키워드 만들기", master: "master 다시 만들기" };
 var TODO = [["decide", "결정 대기"], ["answer", "답변 대기"], ["apply", "반영 대기"]];
 var STATUS_ORDER = ["pending", "adopted", "held", "excluded"];
@@ -482,7 +494,7 @@ function renderList(groups) {
   if (S.loading) { L.appendChild(emptyBox("불러오는 중…")); return; }
   if (S.error) { L.appendChild(emptyBox("불러오지 못했습니다", S.error, el("button", { type: "button", class: "btn", onclick: load, text: "다시 시도" }))); return; }
   if (!S.exps.length) {
-    L.appendChild(LIVE ? emptyBox("아직 경험 카드가 없습니다", "터미널에서 mp scan → mp group을 실행하면 여기에 나타납니다.")
+    L.appendChild(LIVE ? emptyBox("아직 경험 카드가 없습니다", "아래 작업 바에서 [새 자료 스캔] → [경험 묶기]를 실행하면 여기에 나타납니다.")
       : emptyBox("채택된 경험이 없습니다", "mp review(또는 mp ui)로 경험을 채택한 뒤 mp master를 다시 실행하세요."));
     return;
   }
@@ -898,7 +910,18 @@ function renderJob() {
   if (run) {
     left.appendChild(el("span", { class: "spin", "aria-hidden": "true" }));
     left.appendChild(el("strong", { text: (JOB_LABEL[j.kind] || j.kind) + " 실행 중" }));
-    left.appendChild(el("span", { class: "jb-line", text: j.lines.length ? j.lines[j.lines.length - 1] : "" }));
+    var pr = j.progress;
+    if (pr) {
+      var pct = pr.overall !== null && pr.overall !== undefined ? pr.overall : (pr.total ? pr.done / pr.total : 0);
+      var bar = el("span", { class: "jb-bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(pct * 100)) });
+      var fill = el("span", { class: "jb-fill" });
+      fill.style.width = Math.max(2, Math.round(pct * 100)) + "%";
+      bar.appendChild(fill);
+      left.appendChild(bar);
+      left.appendChild(el("span", { class: "jb-prog", text: progressText(pr) }));
+    } else {
+      left.appendChild(el("span", { class: "jb-line", text: j.lines.length ? j.lines[j.lines.length - 1] : "" }));
+    }
   } else {
     left.appendChild(el("span", {}, ["반영 대기 ", el("strong", { text: String(pend) }), "개"]));
     if (j) left.appendChild(el("span", { class: "jb-last " + (j.code === 0 ? "ok" : "err"), text: "최근: " + (JOB_LABEL[j.kind] || j.kind) + (j.code === 0 ? " 완료" : " 실패(코드 " + j.code + ")") }));

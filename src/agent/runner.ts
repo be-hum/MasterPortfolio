@@ -3,6 +3,7 @@ import type { Config } from "../core/schema.js";
 import { AcpBridge, AgentError } from "./bridge.js";
 import { agentForStage, modelForStage, type Stage } from "./agents.js";
 import { UsageMeter, formatResetsAt, pct } from "./budget.js";
+import { progress } from "../core/progress.js";
 
 export const BUDGET_DECLINED = "시작 시 사용률이 높아 사용자가 중단";
 export const BUDGET_EXCEEDED = "사용량 예산 도달";
@@ -72,6 +73,7 @@ export function createStageRunner(config: Config, o: {
     withBridge: async (stage: Stage, work: (b: AcpBridge) => Promise<{ stopped: Stop | null }>): Promise<{ stopped: Stop | null }> => {
       // 예산을 이미 다 썼으면 에이전트를 띄우지 않는다(9.8)
       if (meter.exceeded()) return { stopped: budgetStop() };
+      progress.begin(stage);
       const bridge = new AcpBridge(agentForStage(config, stage), { log });
       try {
         try { await bridge.start(); }

@@ -1,4 +1,5 @@
 import { AgentError, type AcpBridge, type AgentReply } from "../agent/bridge.js";
+import { progress } from "../core/progress.js";
 import { classifyError } from "../agent/classify.js";
 import type { FileExtraction } from "../core/schema.js";
 import type { TokenUsage } from "../agent/usage.js";
@@ -75,7 +76,9 @@ export async function runBatches<I extends { id: string }, R>(
     if (pending) for (const id of pending) await opts.onFailed(id);
     pending = null;
   };
+  progress.report(0, batches.length);
   for (let bi = 0; bi < batches.length; bi++) {
+    if (bi > 0) progress.report(bi, batches.length);
     const halt = await opts.beforeBatch?.();
     if (halt) return { stopped: halt };
     let session: string;
@@ -123,6 +126,7 @@ export async function runBatches<I extends { id: string }, R>(
     await flushPending();
     for (const id of failedIds) await opts.onFailed(id);
   }
+  progress.report(batches.length, batches.length);
   await flushPending();
   return { stopped: null };
 }

@@ -11,9 +11,11 @@ import { acceptExperienceEdit, listExperiences, saveExperience, type LoadedExper
 import { decideReview, recordAnswer } from "../review/session.js";
 import { clampKeywords } from "../analyzer/keywords.js";
 import { buildUiState, loadFileTitles } from "./model.js";
+import { PROGRESS_PREFIX, etaSeconds, overallProgress, type ProgressEvent } from "../core/progress.js";
 
 export type UiServerOptions = { out: string; port?: number; token: string; cliPath: string; html: (token: string) => string; onShutdown?: () => void };
-export type JobState = { kind: string; running: boolean; code: number | null; lines: string[] };
+export type JobProgress = { stage: string; done: number; total: number; overall: number | null; etaSec: number | null };
+export type JobState = { kind: string; running: boolean; code: number | null; lines: string[]; progress: JobProgress | null };
 
 const MAX_BODY = 1024 * 1024;
 const MAX_DRAIN = 64 * 1024 * 1024;
@@ -69,10 +71,18 @@ const obj = (b: unknown): Record<string, unknown> => {
 export async function startUiServer(o: UiServerOptions): Promise<{ url: string; port: number; close(): Promise<void> }> {
   const { out, token } = o;
   let port = 0;
-  let job: { kind: string; running: boolean; code: number | null; lines: string[]; child: ChildProcess | null } | null = null;
+  let job: { kind: string; running: boolean; code: number | null; lines: string[]; child: ChildProcess | null; progress: ProgressEvent | null; startedAt: number } | null = null;
   let chain: Promise<unknown> = Promise.resolve();
   const serial = <T>(fn: () => Promise<T>): Promise<T> => { const r = chain.then(fn, fn); chain = r.catch(() => {}); return r; };
-  const jobState = (): JobState | null => (job ? { kind: job.kind, running: job.running, code: job.code, lines: [...job.lines] } : null);
+  const jobState = (): JobState | null => {
+    if (!job) return null;
+    const p = job.progress;
+    const overall = p ? overallProgress(job.kind, p) : null;
+    return {
+      kind: job.kind, running: job.running, code: job.code, lines: [...job.lines],
+      progress: p ? { ...p, overall, etaSec: job.running ? etaSeconds(overall, Date.now() - job.startedAt) : null } : null,
+    };
+  };
 
   async function fresh(): Promise<{ state: State; exps: LoadedExperience[] }> {
     const { state, problem } = await loadState(out);
@@ -93,10 +103,17 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     if (job?.running) throw new HttpError(409, "이미 작업이 실행 중입니다.");
     const args = JOBS[kind];
     if (!args) throw new HttpError(400, "알 수 없는 작업입니다.");
-    const j = { kind, running: true, code: null as number | null, lines: [] as string[], child: null as ChildProcess | null };
+    const j = { kind, running: true, code: null as number | null, lines: [] as string[], child: null as ChildProcess | null, progress: null as ProgressEvent | null, startedAt: Date.now() };
     job = j;
-    const push = (l: string) => { j.lines.push(l); if (j.lines.length > MAX_LINES) j.lines.splice(0, j.lines.length - MAX_LINES); };
-    const child = spawn(process.execPath, [o.cliPath, ...args], { cwd: process.cwd(), env: { ...process.env, MP_OUTPUT_DIR: out }, stdio: ["ignore", "pipe", "pipe"] });
+    const push = (l: string) => {
+      // 진행률 줄(@@progress {...})은 로그에 넣지 않고 상태로만 쓴다
+      if (l.startsWith(PROGRESS_PREFIX)) {
+        try { const ev = JSON.parse(l.slice(PROGRESS_PREFIX.length)) as ProgressEvent; if (typeof ev.stage === "string" && Number.isFinite(ev.done) && Number.isFinite(ev.total)) j.progress = ev; } catch { /* 무시 */ }
+        return;
+      }
+      j.lines.push(l); if (j.lines.length > MAX_LINES) j.lines.splice(0, j.lines.length - MAX_LINES);
+    };
+    const child = spawn(process.execPath, [o.cliPath, ...args], { cwd: process.cwd(), env: { ...process.env, MP_OUTPUT_DIR: out, MP_PROGRESS: "1" }, stdio: ["ignore", "pipe", "pipe"] });
     j.child = child;
     for (const s of [child.stdout!, child.stderr!]) {
       let buf = "";

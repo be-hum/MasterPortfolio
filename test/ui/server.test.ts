@@ -180,6 +180,21 @@ describe("mp ui server (11.5)", () => {
     expect(down).toBe(1);
   });
 
+  it("job progress: @@progress lines become job.progress (with overall %) and stay out of the log", async () => {
+    const dir = await mkTmp("mp-stub-"); dirs.push(dir);
+    const stub = join(dir, "stub.mjs");
+    await writeFile(stub, `if (process.env.MP_PROGRESS !== "1") process.exit(9); console.log("시작"); console.log('@@progress {"stage":"extract","done":3,"total":6}'); console.log("@@progress {bad"); setTimeout(() => process.exit(0), 300);`);
+    const { call } = await setup(stub);
+    expect((await call("POST", "/api/job", { kind: "scan" })).status).toBe(200);
+    let job: any;
+    for (let i = 0; i < 100; i++) { job = (await call("GET", "/api/job")).json.job; if (job.progress || !job.running) break; await new Promise((r) => setTimeout(r, 30)); }
+    expect(job.progress).toMatchObject({ stage: "extract", done: 3, total: 6 });
+    expect(job.progress.overall).toBeCloseTo(0.55);
+    for (let i = 0; i < 100; i++) { job = (await call("GET", "/api/job")).json.job; if (!job.running) break; await new Promise((r) => setTimeout(r, 30)); }
+    expect(job.code).toBe(0);
+    expect(job.lines).toEqual(["시작"]);
+  });
+
   it("job: runs a child, keeps the last 200 lines, and rejects a second start with 409", async () => {
     const dir = await mkTmp("mp-stub-"); dirs.push(dir);
     const stub = join(dir, "stub.mjs");

@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import { progress } from "../core/progress.js";
 import { access, constants, mkdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { confirm as inqConfirm } from "@inquirer/prompts";
@@ -248,7 +249,10 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
   const initial = await collectUnjudged(out, state);
   const earlier = new Set(initial.items.map((i) => initial.keyById.get(i.id)!));
   // 범위 단계에서 멈췄으면(사용량 한도·인증·예산) 판정도 하지 않는다
+  // 진행률: 이전 실행에서 남은 카드 판정은 마지막 판정과 따로 센다
+  progress.override("judge-pending");
   const preStop = scopeStop ?? await judgeStage((k) => earlier.has(k), true);
+  progress.override(null);
   if (preStop && batches.length && report.stoppedReason) report.stoppedReason += ` 새 파일 ${selected.length}개는 분석하지 않았습니다.`;
 
   // 1단계: 추출

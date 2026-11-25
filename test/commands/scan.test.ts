@@ -77,6 +77,22 @@ describe("runScan", () => {
     expect(prompts).not.toContain("메모.txt");
   });
 
+  it("reports stage progress lines for the UI when MP_PROGRESS=1 (scope → triage → extract → judge, ending done=total)", async () => {
+    await setup("ok");
+    process.env.MP_PROGRESS = "1";
+    const lines: string[] = [];
+    const orig = process.stdout.write.bind(process.stdout);
+    vi.spyOn(process.stdout, "write").mockImplementation(((s: string | Uint8Array, ...rest: unknown[]) => {
+      if (typeof s === "string" && s.startsWith("@@progress ")) { lines.push(s); return true; }
+      return (orig as (...a: unknown[]) => boolean)(s, ...rest);
+    }) as never);
+    try { expect((await runScan({ yes: true })).code).toBe(0); } finally { delete process.env.MP_PROGRESS; }
+    const evs = lines.map((l) => JSON.parse(l.slice("@@progress ".length)));
+    const stages = [...new Set(evs.map((e) => e.stage))];
+    expect(stages).toEqual(["scope", "triage", "extract", "judge"]);
+    for (const st of stages) { const last = evs.filter((e) => e.stage === st).at(-1); expect(last.done).toBe(last.total); }
+  });
+
   it("second scan sends nothing new", async () => {
     const { log } = await setup("ok");
     await runScan({ yes: true });
