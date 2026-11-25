@@ -6,7 +6,7 @@
 // 필요한 도구: npm, curl, tar, unzip, zip
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -66,6 +66,8 @@ function pruneApp(nm) {
   };
   walk(nm);
   rmSync(join(nm, "@types"), { recursive: true, force: true });
+  // .bin은 명령줄 단축용 심볼릭 링크라 실행에 필요 없고, Windows 압축 해제에서 "심볼릭 링크를 생성할 수 없습니다" 오류를 낸다
+  rmSync(join(nm, ".bin"), { recursive: true, force: true });
   const pdfjs = join(nm, "pdfjs-dist");
   for (const x of ["build", "web", "types", "image_decoders", "legacy/web", "legacy/image_decoders", "legacy/webpack.mjs"]) rmSync(join(pdfjs, x), { recursive: true, force: true });
   for (const f of readdirSync(join(pdfjs, "legacy", "build"))) if (!["pdf.mjs", "pdf.worker.mjs"].includes(f)) rmSync(join(pdfjs, "legacy", "build", f));
@@ -73,6 +75,11 @@ function pruneApp(nm) {
 }
 const dirSize = (d) => readdirSync(d, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? dirSize(join(d, e.name)) : e.isFile() ? statSync(join(d, e.name)).size : 0), 0);
 const mb = (b) => `${(b / 1048576).toFixed(1)}MB`;
+const findSymlinks = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+  const p = join(d, e.name);
+  if (lstatSync(p).isSymbolicLink()) return [p];
+  return e.isDirectory() ? findSymlinks(p) : [];
+});
 
 function extractRuntime(target, archivePath, dest) {
   const tmp = join(REL, "stage", `rt-${target}`);
@@ -105,8 +112,15 @@ function build(target, sums) {
   writeFileSync(join(dir, "VERSION.txt"), `MasterPortfolio ${pkg.version}\nNode.js ${NODE_VERSION} (${target})\n`);
   const zip = join(REL, `MasterPortfolio-${pkg.version}-${target}.zip`);
   rmSync(zip, { force: true });
-  // -y: 심볼릭 링크 유지(macOS runtime/bin/npx 등), 실행 권한은 zip이 그대로 기록한다
-  run("zip", ["-qry", "-X", zip, "MasterPortfolio"], base);
+  if (t.os === "windows") {
+    // Windows는 일반 권한으로 심볼릭 링크를 만들 수 없다. 링크가 하나라도 있으면 묶지 않는다
+    const links = findSymlinks(dir);
+    if (links.length) throw new Error(`Windows 묶음에 심볼릭 링크가 있습니다: ${links.slice(0, 5).join(", ")}`);
+    run("zip", ["-qr", "-X", zip, "MasterPortfolio"], base);
+  } else {
+    // -y: 심볼릭 링크 유지(macOS runtime/bin/npx·npm), 실행 권한은 zip이 그대로 기록한다
+    run("zip", ["-qry", "-X", zip, "MasterPortfolio"], base);
+  }
   console.log(`  → ${zip}`);
 }
 
