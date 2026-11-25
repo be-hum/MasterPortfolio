@@ -34,7 +34,7 @@ describe("setup mode (11.6)", () => {
   it("blocks data/job/settings routes with 409 and reports setup:true", async () => {
     const { call } = await boot(null);
     expect((await call("GET", "/api/state")).json).toEqual({ ok: true, setup: true });
-    for (const [m, p] of [["GET", "/api/job"], ["POST", "/api/job"], ["POST", "/api/job/stop"], ["GET", "/api/folder-hints"], ["GET", "/api/agent-status"], ["POST", "/api/folder-hints"], ["POST", "/api/decide"], ["GET", "/api/settings"], ["POST", "/api/settings"], ["POST", "/api/settings/scope-reset"], ["GET", "/files/x.md"]] as const) {
+    for (const [m, p] of [["GET", "/api/job"], ["POST", "/api/job"], ["POST", "/api/job/stop"], ["GET", "/api/folder-hints"], ["GET", "/api/agent-status"], ["POST", "/api/scope-answer"], ["POST", "/api/folder-hints"], ["POST", "/api/decide"], ["GET", "/api/settings"], ["POST", "/api/settings"], ["POST", "/api/settings/scope-reset"], ["GET", "/files/x.md"]] as const) {
       const r = await call(m, p, m === "POST" ? {} : undefined);
       expect([p, r.status, r.json?.error]).toEqual([p, 409, "처음 설정이 필요합니다."]);
     }
@@ -233,6 +233,24 @@ describe("settings API (11.6)", () => {
     expect(n).toBe(1);
     expect(await get("/api/agent-status?refresh=1")).toEqual({ ok: true });
     expect(n).toBe(2);
+  });
+
+  it("scope questions: listed in settings and counted in state; answering stores a user decision; reset clears questions too", async () => {
+    const { scan, out, call } = await normal();
+    const c = await loadConfig(out);
+    const q = (n: number) => ({ q: "본인 자료인가요?", fileCount: n, extCounts: { pdf: n }, samples: ["a.pdf"], at: "t" });
+    c.scope.questions = { [join(scan, "q1")]: q(2), [join(scan, "q2")]: q(3), [join(scan, "z", "q3")]: q(1) };
+    await saveConfig(out, c);
+    expect((await call("GET", "/api/state")).json.scopeQuestions).toBe(3);
+    expect((await call("GET", "/api/settings")).json.questions.map((x: any) => x.path).sort()).toEqual([join(scan, "q1"), join(scan, "q2"), join(scan, "z", "q3")].sort());
+    expect((await call("POST", "/api/scope-answer", { path: join(scan, "q1"), decision: "maybe" })).status).toBe(400);
+    expect((await call("POST", "/api/scope-answer", { path: join(scan, "nope"), decision: "include" })).status).toBe(404);
+    expect((await call("POST", "/api/scope-answer", { path: join(scan, "q1"), decision: "exclude" })).json).toEqual({ ok: true, left: 2 });
+    const c2 = await loadConfig(out);
+    expect(c2.scope.decisions[join(scan, "q1")]).toMatchObject({ decision: "exclude", by: "user" });
+    expect(Object.keys(c2.scope.questions)).toHaveLength(2);
+    await call("POST", "/api/settings/scope-reset", { path: join(scan, "z") });
+    expect(Object.keys((await loadConfig(out)).scope.questions)).toEqual([join(scan, "q2")]);
   });
 
   it("scope-reset removes the path and its children only", async () => {

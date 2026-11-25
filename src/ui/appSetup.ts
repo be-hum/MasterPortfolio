@@ -92,6 +92,8 @@ export const SETUP_CSS = `
 .tbl tr.cf td{background:var(--warn-bg);color:var(--warn-ink)}
 .cf-in{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .cf-in p{margin:0;flex:1 1 260px}
+.qlist{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.q-item{padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .btn.danger{background:var(--danger);border-color:var(--danger);color:var(--surface);font-weight:650}
 .dec-include{color:var(--ok);font-weight:650}
 .dec-exclude{color:var(--ink-3);font-weight:650}
@@ -549,8 +551,36 @@ function renderSettings() {
         : [el("p", { class: "muted", text: "불러오는 중…" })]));
       return;
     }
-    [setFolders(), setPlan(), setKeywords(), setScope(), setOutput(), setCheck()].forEach(function (c) { inner.appendChild(c); });
+    [setQuestions(), setFolders(), setPlan(), setKeywords(), setScope(), setOutput(), setCheck()].forEach(function (c) { if (c) inner.appendChild(c); });
+    if (ST.focusQ) { ST.focusQ = false; setTimeout(function () { var h = $("set-h-q"); if (h) { h.scrollIntoView({ block: "start" }); var b = document.querySelector('[data-k^="set:qa:"]'); if (b) b.focus({ preventScroll: true }); } }, 0); }
   });
+}
+/** 화면 스캔에서 남긴 폴더 범위 질문(5.5): 답하면 사용자 판단으로 저장된다 */
+function setQuestions() {
+  var qs = ST.data.questions || [];
+  if (!qs.length) return null;
+  var answer = function (q, decision) {
+    api("POST", "/api/scope-answer", { path: q.path, decision: decision }).then(function (r) {
+      if (!ST) return;
+      if (!r.ok) { toast(errMsg(r), "err"); return; }
+      S.scopeQuestions = r.json.left;
+      toast((decision === "include" ? "포함" : "제외") + "으로 저장했습니다" + (decision === "exclude" ? " · 하위 폴더도 다음 스캔부터 제외됩니다" : ""));
+      fetchSettings(false, false); renderHints();
+    }, netErr);
+  };
+  return card("set-h-q", "확인이 필요한 폴더 " + qs.length + "개", "스캔 중에 판단이 애매했던 폴더입니다. 답하기 전까지는 포함해서 스캔합니다.",
+    [el("ul", { class: "qlist" }, qs.map(function (q) {
+      var exts = Object.keys(q.extCounts || {}).sort(function (a, b) { return q.extCounts[b] - q.extCounts[a]; }).map(function (e) { return e + " " + q.extCounts[e]; }).join(", ");
+      return el("li", { class: "q-item" }, [
+        el("p", { class: "mono", style: "margin:0", text: q.path }),
+        el("p", { class: "lead small", style: "margin:2px 0 0", text: "파일 " + q.fileCount + "개" + (exts ? " (" + exts + ")" : "") + (q.samples && q.samples.length ? " · 예: " + q.samples.join(", ") : "") }),
+        el("p", { style: "margin:6px 0", text: q.q }),
+        el("div", { class: "inline" }, [
+          el("button", { type: "button", class: "btn sm", "data-k": "set:qa:" + q.path, disabled: busy(), onclick: function () { answer(q, "include"); }, text: "포함" }),
+          el("button", { type: "button", class: "btn sm", "data-k": "set:qe:" + q.path, disabled: busy(), onclick: function () { answer(q, "exclude"); }, text: "제외 (하위 폴더 포함)" })
+        ])
+      ]);
+    }))]);
 }
 function card(id, title, lead, kids) {
   return el("section", { class: "card", "aria-labelledby": id }, [el("h2", { id: id, text: title }), lead ? el("p", { class: "lead small", text: lead }) : null].concat(kids));

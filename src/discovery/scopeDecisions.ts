@@ -48,7 +48,7 @@ export function scopeResolver(decisions: ScopeDecisions, platform: NodeJS.Platfo
 }
 
 /** 이미 저장된 같은 경로(대소문자만 다른 것 포함)의 키 */
-export function findDecisionKey(decisions: ScopeDecisions, p: string, platform: NodeJS.Platform = process.platform): string | null {
+export function findDecisionKey(decisions: Record<string, unknown>, p: string, platform: NodeJS.Platform = process.platform): string | null {
   const k = pathKey(p, platform);
   return Object.keys(decisions).find((x) => pathKey(x, platform) === k) ?? null;
 }
@@ -66,7 +66,7 @@ export function setScopeDecision(
 }
 
 /** `mp scope --reset <경로>`: 그 경로와 하위 판단을 지운다. 지운 키 목록. */
-export function resetScopeDecisions(decisions: ScopeDecisions, p: string, platform: NodeJS.Platform = process.platform): string[] {
+export function resetScopeDecisions(decisions: Record<string, unknown>, p: string, platform: NodeJS.Platform = process.platform): string[] {
   const k = pathKey(p, platform);
   const removed = Object.keys(decisions).filter((x) => { const xk = pathKey(x, platform); return xk === k || under(xk, k); });
   for (const x of removed) delete decisions[x];

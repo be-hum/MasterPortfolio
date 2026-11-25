@@ -10,7 +10,7 @@ import type { Stop } from "../analyzer/analyze.js";
 import { scopeFolders, type ScopeItem, type ScopeResult } from "../analyzer/scope.js";
 import { createStageRunner, type StageRunner } from "../agent/runner.js";
 import { walk } from "../discovery/walk.js";
-import { resetScopeDecisions, setScopeDecision } from "../discovery/scopeDecisions.js";
+import { decisionKey, findDecisionKey, resetScopeDecisions, setScopeDecision } from "../discovery/scopeDecisions.js";
 import { collectScopeFolders, contentNameCheck, type ScopeFolder } from "../scan/scopeCandidates.js";
 import { extractorFor } from "../extractors/registry.js";
 import { isoNow } from "../store/cards.js";
@@ -66,6 +66,8 @@ export async function runScopeStage(config: Config, folders: ScopeFolder[], deps
   const decide = (f: ScopeFolder, decision: "include" | "exclude", by: "llm" | "user") => {
     // 대상 선정에서 판단 있는 폴더는 빠지므로 보통 생기지 않지만, 사용자 판단은 LLM이 덮어쓰지 않는다
     if (!setScopeDecision(config.scope.decisions, f.path, decision, by, now(), deps.platform)) { log(`[scope kept user decision] ${f.key}`); return; }
+    const qk = findDecisionKey(config.scope.questions, f.path, deps.platform);
+    if (qk) delete config.scope.questions[qk];
     summary.decided.push({ path: f.key, decision, by });
     log(`[scope ${decision}] ${by} ${f.key}`);
   };
@@ -99,7 +101,11 @@ export async function runScopeStage(config: Config, folders: ScopeFolder[], deps
       if (a === "y") decide(f, "include", "user");
       else if (a === "n") decide(f, "exclude", "user");
       // 질문도 남겨 --yes 실행 뒤 사용자가 로그에서 확인할 수 있게 한다
-      else log(`[scope later] ${f.key} — ${q}`);
+      else {
+        log(`[scope later] ${f.key} — ${q}`);
+        // 바로 물을 수 없는 실행(화면·--yes)이면 질문을 저장해 화면에서 답하게 한다. 터미널에서 '나중에'를 고른 것은 저장하지 않는다
+        if (!deps.ask) config.scope.questions[decisionKey(f.path)] = { q, fileCount: f.fileCount, extCounts: f.extCounts, samples: f.samples.map(String), at: now() };
+      }
     }
   }
   summary.included = summary.decided.filter((d) => d.decision === "include").length;
@@ -168,9 +174,23 @@ export async function runScopeCommand(opts: ScopeCommandOptions): Promise<number
     const p = normalizeFolderInput(opts.reset);
     if (!p) { console.error("--reset에 경로를 입력하세요."); return 2; }
     const removed = resetScopeDecisions(decisions, p);
+    resetScopeDecisions(config.scope.questions, p);
     await saveConfig(out, config);
     console.log(`판단 ${removed.length}개를 지웠습니다${removed.length ? `: ${removed.join(", ")}` : ""}. 다음 \`mp scope\` 또는 \`mp scan\`에서 다시 판단합니다.`);
     return 0;
+  }
+  // 화면 스캔에서 남긴 질문: 터미널에서 실행했으면 먼저 묻는다
+  const pending = Object.entries(config.scope.questions);
+  if (pending.length && !opts.yes && (opts.askFolder !== undefined || process.stdin.isTTY === true)) {
+    const askQ = opts.askFolder ?? terminalScopeAsk;
+    for (const [p, q] of pending) {
+      const f = { path: p, key: p, root: "", relPath: p, fileCount: q.fileCount, extCounts: q.extCounts, samples: q.samples } as unknown as ScopeFolder;
+      const a = await askQ(f, q.q);
+      if (a === "s") continue;
+      setScopeDecision(decisions, p, a === "y" ? "include" : "exclude", "user", isoNow());
+      delete config.scope.questions[p];
+    }
+    await saveConfig(out, config);
   }
   const walks = await walkScanFolders(config, out);
   const folders = await collectScopeFolders(walks.map((w) => ({ root: w.root, entries: w.result.entries })), config, { nameSafe: contentNameCheck(extractorFor) });

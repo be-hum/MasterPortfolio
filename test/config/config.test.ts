@@ -69,13 +69,13 @@ describe("config scope.decisions (§5.5)", () => {
     const dir = await mkTmp();
     try {
       const c = defaultConfig({ university: { input: "", keywords: [] }, scanFolders: [], agent: "claude" });
-      expect(c.scope).toEqual({ decisions: {} });
+      expect(c.scope).toEqual({ decisions: {}, questions: {} });
       await saveConfig(dir, c);
       const p = join(dir, ".mp", "config.json");
       const raw = JSON.parse(await readFile(p, "utf8"));
       delete raw.scope;
       await writeFile(p, JSON.stringify(raw));
-      expect((await loadConfig(dir)).scope).toEqual({ decisions: {} });
+      expect((await loadConfig(dir)).scope).toEqual({ decisions: {}, questions: {} });
       raw.scope = { decisions: { "/a": { decision: "exclude", by: "user", at: "2026-11-24T00:00:00.000Z" } } };
       await writeFile(p, JSON.stringify(raw));
       expect((await loadConfig(dir)).scope.decisions["/a"].by).toBe("user");

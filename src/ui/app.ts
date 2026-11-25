@@ -302,7 +302,7 @@ var DEFAULT_STATUSES = LIVE ? ["pending", "adopted"] : null;
 var DECISIONS = [["adopted", "채택"], ["held", "보류"], ["excluded", "제외"]];
 
 var S = {
-  exps: [], output: "", generatedAt: "", job: null, loading: LIVE, error: null, hints: null, hintsAsked: false, lastScan: null, staleClosed: false, agent: null, agentChecking: false, agentClosed: false,
+  exps: [], output: "", generatedAt: "", job: null, loading: LIVE, error: null, hints: null, hintsAsked: false, lastScan: null, staleClosed: false, agent: null, agentChecking: false, agentClosed: false, scopeQuestions: 0, scopeQClosed: false,
   view: "category", statuses: DEFAULT_STATUSES ? DEFAULT_STATUSES.slice() : null, contribs: [], q: "", todo: null,
   sel: null, open: null, order: [], activeG: null, checked: {}, skipped: {}, drafts: {},
   editing: false, form: null, form0: null, fileView: null, showLog: false, polling: false, menu: false
@@ -367,7 +367,7 @@ function load() {
     if (!r.ok) S.error = errMsg(r);
     else if (r.json.setup) { enterSetup(); return; }
     else {
-      S.error = null; S.exps = r.json.experiences || []; S.output = r.json.output || ""; S.job = r.json.job || null; S.lastScan = r.json.lastScan || null;
+      S.error = null; S.exps = r.json.experiences || []; S.output = r.json.output || ""; S.job = r.json.job || null; S.lastScan = r.json.lastScan || null; S.scopeQuestions = r.json.scopeQuestions || 0;
       if (busy()) ensurePoll();
       if (!S.hintsAsked) { S.hintsAsked = true; fetchHints(); fetchAgent(false); }
     }
@@ -936,9 +936,12 @@ function staleDays() {
 function renderHints() {
   var H = $("hintbar");
   if (!H) return;
+  fillHints(H);
+  H.hidden = !H.childNodes.length;
+}
+function fillHints(H) {
   var list = S.hints || [];
   var stale = staleDays();
-  H.hidden = !list.length && stale === null && !(S.agent && !S.agent.ok && !S.agentClosed);
   clear(H);
   var ag = S.agent && !S.agent.ok && !S.agentClosed ? S.agent : null;
   if (ag) {
@@ -951,6 +954,14 @@ function renderHints() {
     H.appendChild(el("div", { class: "hb-btns" }, [
       el("button", { type: "button", class: "btn sm primary", "data-k": "agent:recheck", disabled: S.agentChecking, onclick: function () { fetchAgent(true); }, text: S.agentChecking ? "확인 중…" : "다시 확인" }),
       el("button", { type: "button", class: "btn sm ghost", "data-k": "agent:close", onclick: function () { S.agentClosed = true; renderHints(); }, text: "닫기" })
+    ]));
+  }
+  var nq = S.scopeQClosed || busy() ? 0 : S.scopeQuestions;
+  if (nq) {
+    H.appendChild(el("p", {}, [el("strong", { text: "확인이 필요한 폴더 " + nq + "개가 있습니다." }), " 스캔 중에 포함할지 애매했던 폴더입니다. 답하기 전까지는 포함해서 스캔합니다."]));
+    H.appendChild(el("div", { class: "hb-btns" }, [
+      el("button", { type: "button", class: "btn sm primary", "data-k": "scopeq:open", onclick: function () { openSettings(); ST.focusQ = true; }, text: "답하기" }),
+      el("button", { type: "button", class: "btn sm ghost", "data-k": "scopeq:close", onclick: function () { S.scopeQClosed = true; renderHints(); }, text: "나중에" })
     ]));
   }
   if (stale !== null) {

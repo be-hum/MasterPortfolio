@@ -17,7 +17,8 @@ import { pathKey } from "../core/paths.js";
 import { checkEnvironment, probeAgent, type AgentProbe } from "../setup/check.js";
 import { pickFolder, PickUnavailable } from "../setup/pickFolder.js";
 import { expandUniversity } from "../discovery/universities.js";
-import { resetScopeDecisions } from "../discovery/scopeDecisions.js";
+import { findDecisionKey, resetScopeDecisions, setScopeDecision } from "../discovery/scopeDecisions.js";
+import { isoNow } from "../store/cards.js";
 import { loadConfig, saveConfig } from "../config/config.js";
 import { killTree, spawnGroupOptions } from "./killTree.js";
 import { CHAIN, PROGRESS_PREFIX, SUMMARY_PREFIX, chainProgress, etaSeconds, overallProgress, type ProgressEvent } from "../core/progress.js";
@@ -259,7 +260,8 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     if (path === "/api/state" && method === "GET") {
       const dir = cur();
       const { state, exps } = await fresh();
-      return send(res, 200, { ok: true, experiences: buildUiState(exps, await loadFileTitles(dir, exps)), job: jobState(), output: dir, lastScan: state.last_scan });
+      const scopeQuestions = await loadConfig(dir).then((c) => Object.keys(c.scope.questions).length, () => 0);
+      return send(res, 200, { ok: true, experiences: buildUiState(exps, await loadFileTitles(dir, exps)), job: jobState(), output: dir, lastScan: state.last_scan, scopeQuestions });
     }
     if (path === "/api/job" && method === "GET") return send(res, 200, { ok: true, job: jobState() });
     if (path === "/api/setup/suggest" && method === "GET") {
@@ -287,7 +289,8 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       const c = await loadConfig(dir);
       return send(res, 200, { ok: true, output: dir, university: c.university.input, keywords: c.university.keywords, scanFolders: c.scanFolders,
         planScale: c.budget.planScale, fiveHourShare: c.budget.fiveHourShare,
-        scope: Object.entries(c.scope.decisions).map(([p, d]) => ({ path: p, decision: d.decision, by: d.by, at: d.at })) });
+        scope: Object.entries(c.scope.decisions).map(([p, d]) => ({ path: p, decision: d.decision, by: d.by, at: d.at })),
+        questions: Object.entries(c.scope.questions).map(([p, q]) => ({ path: p, ...q })) });
     }
     if (method !== "POST") throw new HttpError(404, "없는 경로입니다.");
     const b = obj(await readBody(req));
@@ -342,6 +345,19 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       return;
     }
     if (path === "/api/settings") return serial(async () => { await settingsPost(b, cur()); send(res, 200, { ok: true }); });
+    // 저장된 범위 질문에 답하기: include/exclude는 사용자 판단으로 저장하고 질문을 지운다
+    if (path === "/api/scope-answer") return serial(async () => {
+      const dir = cur();
+      if (job?.running) throw busyErr();
+      if (b.decision !== "include" && b.decision !== "exclude") throw new HttpError(400, "decision은 include 또는 exclude여야 합니다.");
+      const c = await loadConfig(dir);
+      const key = typeof b.path === "string" ? findDecisionKey(c.scope.questions, b.path) : null;
+      if (!key) throw new HttpError(404, "그 폴더에 대한 질문이 없습니다.");
+      setScopeDecision(c.scope.decisions, key, b.decision, "user", isoNow());
+      delete c.scope.questions[key];
+      await saveConfig(dir, c);
+      send(res, 200, { ok: true, left: Object.keys(c.scope.questions).length });
+    });
     if (path === "/api/settings/scope-reset") return serial(async () => {
       const dir = cur();
       if (job?.running) throw busyErr();
@@ -349,7 +365,8 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       if (!raw) throw new HttpError(400, "path가 필요합니다.");
       const c = await loadConfig(dir);
       const removed = resetScopeDecisions(c.scope.decisions, raw);
-      if (removed.length) await saveConfig(dir, c);
+      const removedQ = resetScopeDecisions(c.scope.questions, raw);
+      if (removed.length || removedQ.length) await saveConfig(dir, c);
       send(res, 200, { ok: true, removed: removed.length });
     });
     // 새 폴더 제안에 답하기: add는 스캔 폴더에 넣고, dismiss는 다시 묻지 않는다. 이번에 제안한 폴더만 받는다

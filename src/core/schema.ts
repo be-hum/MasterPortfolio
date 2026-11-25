@@ -148,6 +148,11 @@ export const DEFAULT_FIVE_HOUR_SHARE = 0.3;
 export const DEFAULT_MODELS: Models = { triage: "haiku", extract: "haiku", judge: "opus" };
 
 /** 폴더 범위 판단(5.5). 키는 절대경로(normalizePath). */
+export const ScopeQuestion = z.object({
+  q: z.string(), fileCount: z.number(), extCounts: z.record(z.number()), samples: z.array(z.string()), at: z.string(),
+});
+export type ScopeQuestion = z.infer<typeof ScopeQuestion>;
+
 export const ScopeDecision = z.object({
   decision: z.enum(["include", "exclude"]),
   by: z.enum(["llm", "user"]),
@@ -172,7 +177,8 @@ export const Config = z.object({
     planScale: z.number().min(1).max(100).default(1),
   }).default({ fiveHourShare: DEFAULT_FIVE_HOUR_SHARE, planScale: 1 }),
   /** 폴더 범위 판단(5.5). 기존 config.json에 없으면 빈 목록 */
-  scope: z.object({ decisions: z.record(ScopeDecision).default({}) }).default({ decisions: {} }),
+  /** questions: 화면 스캔처럼 바로 물을 수 없을 때 남긴 범위 질문(사용자가 답하면 지운다). 답을 기다리는 동안은 이번처럼 포함하고 LLM에 다시 보내지 않는다 */
+  scope: z.object({ decisions: z.record(ScopeDecision).default({}), questions: z.record(ScopeQuestion).default({}) }).default({ decisions: {}, questions: {} }),
   /** 화면에서 "다시 묻지 않기"를 고른 폴더 제안(예: 새로 찾은 WSL 폴더). 기존 config.json에 없으면 빈 목록 */
   dismissedFolders: z.array(z.string()).default([]),
 });

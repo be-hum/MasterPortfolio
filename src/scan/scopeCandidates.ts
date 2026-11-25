@@ -80,6 +80,8 @@ export async function collectScopeFolders(
       const k = pathKey(dir, platform);
       if (seen.has(k) || rootKeys.has(k) || k === pathKey(root, platform)) continue;
       if (findDecisionKey(config.scope.decisions, dir, platform)) continue;
+      // 사용자 답을 기다리는 질문이 있는 폴더는 다시 판단하지 않는다(답할 때까지는 포함)
+      if (config.scope.questions && findDecisionKey(config.scope.questions, dir, platform)) continue;
       if (isSensitiveDir(dir)) continue;
       const shown = files.filter((f) => !isSensitivePath(f.path, []));
       const cands = files.filter((f) => isCandidateFile(f, config.limits, config.privacy.allowPaths));

@@ -741,6 +741,14 @@ describe("runScan", () => {
     expect(sent).toContain("UNIQUE-ASK");
     const c = JSON.parse(await readFile(join(out, ".mp", "config.json"), "utf8"));
     expect(c.scope.decisions[normalizePath(join(src, "ASK-모음"))]).toBeUndefined();
+    // 질문은 화면에서 답하도록 저장되고, 다음 스캔에서는 다시 LLM에 보내지 않는다
+    const q = c.scope.questions[normalizePath(join(src, "ASK-모음"))];
+    expect(q).toMatchObject({ q: "ASK-모음 폴더는 직접 만든 자료인가요?" });
+    expect(q.fileCount).toBeGreaterThan(0);
+    const before = (await readFile(log, "utf8")).length;
+    const r2 = await runScan({ yes: true });
+    expect(r2.report!.scope).toBeUndefined();
+    expect((await readFile(log, "utf8")).slice(before)).not.toContain("ASK-모음");
   });
 
   it("stops the whole scan when the scope stage hits the rate limit; the next scan resumes (§5.5)", async () => {
