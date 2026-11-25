@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
+import { writeFileAtomic } from "../core/atomicWrite.js";
 import { join } from "node:path";
 import { Config, DEFAULT_FIVE_HOUR_SHARE, DEFAULT_MODELS } from "../core/schema.js";
 import { DEFAULT_AGENTS } from "../agent/agents.js";
@@ -30,5 +31,5 @@ export async function loadConfig(outputDir: string): Promise<Config> {
 
 export async function saveConfig(outputDir: string, c: Config): Promise<void> {
   await mkdir(join(outputDir, ".mp"), { recursive: true });
-  await writeFile(configPath(outputDir), JSON.stringify(Config.parse(c), null, 2));
+  await writeFileAtomic(configPath(outputDir), JSON.stringify(Config.parse(c), null, 2));
 }

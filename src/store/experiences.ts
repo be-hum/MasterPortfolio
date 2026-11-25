@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { writeFileAtomic } from "../core/atomicWrite.js";
 import { join } from "node:path";
 import { ExperienceFrontmatter, type ExperienceQuestion, type State } from "../core/schema.js";
 import { sha256String } from "../core/hash.js";
@@ -75,7 +76,7 @@ export async function saveExperience(
   if (!known || known.card_body_hash !== sha256String(current)) return { skipped: "edited" };
   const parsed = ExperienceFrontmatter.parse(fm);
   const content = stringifyCard(parsed, renderExperienceBody(star, parsed.questions));
-  await writeFile(path, content);
+  await writeFileAtomic(path, content);
   state.experiences[e.rel] = { card_body_hash: sha256String(content), card_snapshot: parsed as unknown as Record<string, unknown> };
   await saveState(out, state);
   e.fm = parsed; e.star = star; e.body = renderExperienceBody(star, parsed.questions);

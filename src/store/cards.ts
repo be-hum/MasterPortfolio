@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { writeFileAtomic } from "../core/atomicWrite.js";
 import { join } from "node:path";
 import type { Candidate } from "../scan/prefilter.js";
 import { FileCardFrontmatter, type FileExtraction, type JudgeResult, type StateEntry } from "../core/schema.js";
@@ -61,6 +62,6 @@ export async function setCardJudgement(
   const { fm, body } = parseCard(text);
   const next = FileCardFrontmatter.parse({ ...fm, value: r.value, value_reason: r.value_reason });
   const content = stringifyCard(next, body);
-  await writeFile(path, content);
+  await writeFileAtomic(path, content);
   return { entry: { ...entry, card_body_hash: sha256String(content), card_snapshot: next as unknown as Record<string, unknown> } };
 }

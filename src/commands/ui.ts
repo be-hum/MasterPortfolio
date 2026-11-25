@@ -19,10 +19,12 @@ export async function runUi(o: UiOptions = {}): Promise<{ code: number; close?: 
   console.log("종료하려면 화면의 [종료] 버튼을 누르거나 이 창에서 Ctrl+C");
   if (o.open !== false && !openBrowser(srv.url)) console.log("브라우저를 열지 못했습니다. 위 주소를 직접 여세요.");
   if (o.cliPath) return { code: 0, close: srv.close, url: srv.url };
+  // 창을 닫거나(SIGHUP) Ctrl+C·종료 신호를 받으면 실행 중인 작업과 에이전트도 함께 끝낸다(작업은 별도 프로세스 그룹이라 신호가 직접 가지 않는다)
   const onSig = () => stop();
-  process.once("SIGINT", onSig);
+  const SIGNALS: NodeJS.Signals[] = process.platform === "win32" ? ["SIGINT", "SIGBREAK"] : ["SIGINT", "SIGTERM", "SIGHUP"];
+  for (const s of SIGNALS) process.once(s, onSig);
   await stopped;
-  process.off("SIGINT", onSig);
+  for (const s of SIGNALS) process.off(s, onSig);
   await srv.close();
   console.log("화면 서버를 종료했습니다.");
   return { code: 0 };

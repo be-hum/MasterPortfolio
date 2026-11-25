@@ -55,6 +55,8 @@ describe("runScan", () => {
     const statuses = Object.values(state.files).map((e: any) => e.status).sort();
     expect(statuses).toEqual(["done", "skipped_long", "skipped_sensitive"]);
     expect(state.last_scan).not.toBeNull();
+    // 해시 캐시가 저장·로드를 거쳐 남는다(다음 스캔에서 파일을 다시 읽지 않음)
+    expect(Object.keys(state.hash_cache ?? {}).length).toBeGreaterThan(0);
     const reports = await readdir(join(out, "reports"));
     expect(reports).toHaveLength(1);
     expect(reports[0]).toMatch(/^scan-\d{4}-\d{2}-\d{2}-\d{4}\.md$/);
