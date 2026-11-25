@@ -130,11 +130,12 @@ var FOLDER_GROUPS = [
   ["base", "기본 폴더", ["documents", "downloads", "desktop"]],
   ["cloud", "클라우드 폴더", ["cloud"]],
   ["drive", "다른 드라이브", ["drive"]],
+  ["wsl", "WSL(리눅스) 폴더", ["wsl"]],
   ["keyword", "이름이 맞는 폴더", ["keyword"]]
 ];
 /** 경로 비교 키: 끝 구분자 제거, Windows 경로(드라이브 문자·역슬래시)는 대소문자 무시 */
 function folderKey(p) {
-  var s = String(p || "").trim().replace(/[\\/]+$/, "");
+  var s = String(p || "").trim().replace(/[\\/]+$/, "").replace(/^\\\\wsl\$\\/i, "\\\\wsl.localhost\\");
   return /^[A-Za-z]:|\\/.test(s) ? s.replace(/\//g, "\\").toLowerCase() : s;
 }
 /** 목록에 폴더 추가: 맨 위에 체크된 상태로(이미 있으면 맨 위로 옮겨 체크). 빈 경로면 그대로 */

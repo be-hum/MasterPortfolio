@@ -144,57 +144,81 @@ export type WalkOptions = {
   scope?: ScopeDecisions;
   /** 파일 하나를 찾을 때마다(진행률 표시용) */
   onFile?: () => void;
+  /** 동시에 처리할 파일 시스템 호출 수(기본 16). 결과 순서는 이 값과 무관하게 같다 */
+  concurrency?: number;
 };
+
+/** 동시에 n개까지만 실행. 슬롯은 파일 시스템 호출 하나 동안만 잡는다(하위 폴더를 기다리며 잡고 있지 않음 → 교착 없음) */
+export function limiter(n: number) {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= n) await new Promise<void>((r) => waiting.push(r));
+    active++;
+    try { return await fn(); } finally { active--; waiting.shift()?.(); }
+  };
+}
+
+type Found = { entries: WalkEntry[]; inaccessible: string[]; generated: string[] };
 
 export async function walk(root: string, opts: WalkOptions = {}) {
   const home = opts.home ?? homedir();
   const platform = opts.platform ?? process.platform;
   const exclude = opts.excludeRoots ?? [];
   const excluded = (p: string) => exclude.length > 0 && isUnderAny(p, exclude, platform);
-  const entries: WalkEntry[] = [];
-  const inaccessible: string[] = [];
-  /** 생성물로 보여 제외한 폴더·파일(9.7 B). 폴더는 안을 보지 않으므로 폴더 하나로 센다. */
-  const generated: string[] = [];
-  if (isSystemPath(root, home, platform) || excluded(root)) return { entries, inaccessible, generated };
+  const empty = (): Found => ({ entries: [], inaccessible: [], generated: [] });
+  if (isSystemPath(root, home, platform) || excluded(root)) return empty();
   const scope = opts.scope && Object.keys(opts.scope).length ? scopeResolver(opts.scope, platform) : null;
+  const fs = limiter(Math.max(1, opts.concurrency ?? 16));
 
-  async function visit(dir: string): Promise<void> {
+  /**
+   * 폴더 하나를 보고 그 아래 결과를 돌려준다. 하위 폴더·파일은 동시에 처리하되, 결과는 이름순(예전 순차 탐색과 같은 순서)으로 이어 붙인다.
+   * (WSL·네트워크 폴더처럼 호출 하나가 느린 곳에서 순차 탐색보다 몇 배 빠르다)
+   */
+  async function visit(dir: string): Promise<Found> {
+    const f = empty();
     // exclude 판단 폴더: 하위에 include 판단이 없으면 읽지도 않고, 있으면 하위 폴더로만 내려간다(파일·저장소는 버림)
     const scopeExcluded = scope?.decisionFor(dir) === "exclude";
-    if (scopeExcluded && !scope!.includeBelow(dir)) return;
+    if (scopeExcluded && !scope!.includeBelow(dir)) return f;
     let names: Dirent[];
-    try { names = await readdir(dir, { withFileTypes: true }); }
-    catch { inaccessible.push(dir); return; }
+    try { names = await fs(() => readdir(dir, { withFileTypes: true })); }
+    catch { f.inaccessible.push(dir); return f; }
     // MasterPortfolio 결과 폴더(현재 것이 아니어도: 옮긴 백업·다른 결과 폴더)는 우리가 만든 카드라 다시 분석하지 않는다
-    if (names.some((d) => d.name === ".mp") && (await isFile(join(dir, ".mp", "config.json")))) { generated.push(dir); return; }
+    if (names.some((d) => d.name === ".mp") && (await fs(() => isFile(join(dir, ".mp", "config.json"))))) { f.generated.push(dir); return f; }
     // MasterPortfolio 프로그램 폴더(압축 해제본·설치본: app/dist/cli.js + runtime)도 분석 대상이 아니다
-    if (names.some((d) => d.name === "runtime") && (await isFile(join(dir, "app", "dist", "cli.js")))) { generated.push(dir); return; }
-    if (!scopeExcluded && names.some((d) => d.name === ".git")) { entries.push({ kind: "repo", path: dir }); return; }
+    if (names.some((d) => d.name === "runtime") && (await fs(() => isFile(join(dir, "app", "dist", "cli.js"))))) { f.generated.push(dir); return f; }
+    if (!scopeExcluded && names.some((d) => d.name === ".git")) { f.entries.push({ kind: "repo", path: dir }); return f; }
     names.sort((a, b) => a.name.localeCompare(b.name));
     const split = splitOutputFiles(names.filter((d) => !d.isDirectory() && !isExcludedFileName(d.name)).map((d) => d.name));
-    for (const d of names) {
+    const parts = await Promise.all(names.map(async (d): Promise<Found | null> => {
       // 숨김 폴더 안으로는 들어가지 않는다(.git 포함 폴더는 위에서 저장소 하나로 처리됨)
-      if (isExcludedFileName(d.name)) continue;
+      if (isExcludedFileName(d.name)) return null;
       const p = join(dir, d.name);
-      if (isSystemPath(p, home, platform) || excluded(p)) continue;
-      const r = await resolveEntry(d, p);
+      if (isSystemPath(p, home, platform) || excluded(p)) return null;
+      const r = await fs(() => resolveEntry(d, p));
+      const one = empty();
       if (r.kind === "dir") {
-        if (isExcludedDirName(d.name, platform)) continue;
-        if (d.name === "Library" && dir === home) continue;
-        if (isGeneratedDirName(d.name)) { if (!scopeExcluded) generated.push(p); continue; }
-        await visit(p);
+        if (isExcludedDirName(d.name, platform)) return null;
+        if (d.name === "Library" && dir === home) return null;
+        if (isGeneratedDirName(d.name)) { if (!scopeExcluded) one.generated.push(p); return one; }
+        return visit(p);
       } else if (r.kind === "file") {
-        if (scopeExcluded) continue;
-        if (isGeneratedFileName(d.name) || split.has(d.name)) { generated.push(p); continue; }
-        entries.push({ kind: "file", path: p, size: r.stat.size, mtimeMs: r.stat.mtimeMs });
+        if (scopeExcluded) return null;
+        if (isGeneratedFileName(d.name) || split.has(d.name)) { one.generated.push(p); return one; }
+        one.entries.push({ kind: "file", path: p, size: r.stat.size, mtimeMs: r.stat.mtimeMs });
         opts.onFile?.();
       } else if (r.kind === "error") {
-        if (!scopeExcluded) inaccessible.push(p);
+        if (!scopeExcluded) one.inaccessible.push(p);
       }
+      return one;
+    }));
+    for (const x of parts) {
+      if (!x) continue;
+      f.entries.push(...x.entries); f.inaccessible.push(...x.inaccessible); f.generated.push(...x.generated);
     }
+    return f;
   }
-  await visit(root);
-  return { entries, inaccessible, generated };
+  return visit(root);
 }
 
 const isFile = (p: string) => stat(p).then((s) => s.isFile(), () => false);

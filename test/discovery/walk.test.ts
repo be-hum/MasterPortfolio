@@ -2,10 +2,34 @@ import { describe, it, expect } from "vitest";
 import type { Dirent } from "node:fs";
 import { mkdir, rm, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
-import { walk, isExcludedDirName, isExcludedFileName, isUnderAny, resolveEntry, isGeneratedDirName, isGeneratedFileName, splitOutputFiles } from "../../src/discovery/walk.js";
+import { walk, limiter, isExcludedDirName, isExcludedFileName, isUnderAny, resolveEntry, isGeneratedDirName, isGeneratedFileName, splitOutputFiles } from "../../src/discovery/walk.js";
 import { mkTmp } from "../helpers/tmp.js";
 
 describe("walk", () => {
+  it("concurrent walk returns the same results in the same order as a one-at-a-time walk", async () => {
+    const root = await mkTmp();
+    for (const a of ["b", "a", "가", "c"]) {
+      for (const b of ["2", "1", "out", "강의자료"]) {
+        await mkdir(join(root, a, b), { recursive: true });
+        for (const f of ["z.md", "a.pdf", "LICENSE", "m.txt"]) await writeFile(join(root, a, b, f), "x");
+      }
+      await writeFile(join(root, a, "top.docx"), "x");
+    }
+    await mkdir(join(root, "c", "repo", ".git"), { recursive: true });
+    const seq = await walk(root, { concurrency: 1 });
+    const par = await walk(root, { concurrency: 16 });
+    expect(par).toEqual(seq);
+    expect(seq.entries.length).toBe(29);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("limiter never runs more than n at once", async () => {
+    const run = limiter(3);
+    let active = 0, peak = 0;
+    await Promise.all(Array.from({ length: 20 }, () => run(async () => { active++; peak = Math.max(peak, active); await new Promise((r) => setTimeout(r, 2)); active--; })));
+    expect(peak).toBe(3);
+  });
+
   it("lists files, treats git repos as units, skips excluded dirs and symlinks", async () => {
     const root = await mkTmp();
     await mkdir(join(root, "과제"), { recursive: true });

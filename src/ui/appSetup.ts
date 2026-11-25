@@ -373,6 +373,9 @@ function step2() {
     el("button", { type: "button", class: "btn", "data-k": "w:padd", onclick: function () { wizAddPath(W.pathIn); }, text: "추가" })
   ]));
   out.push(pickNote(W, "folders"));
+  var wsl = W.folders.filter(function (f) { return f.kind === "wsl"; });
+  if (wsl.length) out.push(el("p", { class: "note", "data-k": "w:wslnote", role: "status",
+    text: "WSL(리눅스)에서 자료가 있을 만한 폴더 " + wsl.length + "개를 찾아 스캔 대상에 넣었습니다(홈 폴더 전체는 넣지 않음). 원치 않으면 아래에서 체크를 끄세요." }));
   if (!W.folders.length) out.push(el("p", { class: "lead", style: "margin-top:14px", text: W.busy === "suggest" ? "폴더를 찾는 중…" : "제안할 폴더가 없습니다. [폴더 선택]이나 경로 입력으로 추가하세요." }));
   groupFolders(W.folders).forEach(function (g) {
     var c = g.items.filter(function (f) { return f.checked; }).length;

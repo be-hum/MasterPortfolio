@@ -34,7 +34,7 @@ describe("setup mode (11.6)", () => {
   it("blocks data/job/settings routes with 409 and reports setup:true", async () => {
     const { call } = await boot(null);
     expect((await call("GET", "/api/state")).json).toEqual({ ok: true, setup: true });
-    for (const [m, p] of [["GET", "/api/job"], ["POST", "/api/job"], ["POST", "/api/decide"], ["GET", "/api/settings"], ["POST", "/api/settings"], ["POST", "/api/settings/scope-reset"], ["GET", "/files/x.md"]] as const) {
+    for (const [m, p] of [["GET", "/api/job"], ["POST", "/api/job"], ["POST", "/api/job/stop"], ["POST", "/api/decide"], ["GET", "/api/settings"], ["POST", "/api/settings"], ["POST", "/api/settings/scope-reset"], ["GET", "/files/x.md"]] as const) {
       const r = await call(m, p, m === "POST" ? {} : undefined);
       expect([p, r.status, r.json?.error]).toEqual([p, 409, "처음 설정이 필요합니다."]);
     }

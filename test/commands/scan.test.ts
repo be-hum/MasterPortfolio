@@ -61,6 +61,8 @@ describe("runScan", () => {
     const logs = await readdir(join(out, ".mp", "logs"));
     expect(logs.some((n) => n.startsWith("scan-"))).toBe(true);
     expect(logs.some((n) => n.startsWith("prompts-"))).toBe(false);
+    const scanLog = await readFile(join(out, ".mp", "logs", logs.find((n) => n.startsWith("scan-"))!), "utf8");
+    for (const re of [/\[time\] walk .* ms=\d+ files=\d+/, /\[time\] hash ms=\d+/, /\[time\] text ms=\d+/, /\[time\] total ms=\d+/, /\[stage extract\] .* ms=\d+/]) expect(scanLog).toMatch(re);
   });
 
   it("never sends account secrets: recovery-code lists and API keys in innocently named files are skipped", async () => {

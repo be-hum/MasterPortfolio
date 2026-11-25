@@ -19,6 +19,7 @@ import { pickFolder, PickUnavailable } from "../setup/pickFolder.js";
 import { expandUniversity } from "../discovery/universities.js";
 import { resetScopeDecisions } from "../discovery/scopeDecisions.js";
 import { loadConfig, saveConfig } from "../config/config.js";
+import { killTree, spawnGroupOptions } from "./killTree.js";
 import { PROGRESS_PREFIX, SUMMARY_PREFIX, etaSeconds, overallProgress, type ProgressEvent } from "../core/progress.js";
 
 export type SetupDeps = {
@@ -30,7 +31,9 @@ export type UiServerOptions = { out: string | null; port?: number; token: string
 export type JobProgress = { stage: string; done: number; total: number; overall: number | null; etaSec: number | null };
 export type JobState = { kind: string; running: boolean; code: number | null; lines: string[]; progress: JobProgress | null;
   /** 완료 요약: 작업이 보낸 @@summary, 없으면 마지막 표준 출력 줄 */
-  summary: string | null };
+  summary: string | null;
+  /** 사용자가 [중지]를 눌렀음(끝날 때까지 running은 true) */
+  stopped: boolean };
 
 const MAX_BODY = 1024 * 1024;
 const MAX_DRAIN = 64 * 1024 * 1024;
@@ -91,7 +94,7 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
   const needSetup = () => new HttpError(409, "처음 설정이 필요합니다.");
   const cur = (): string => { if (out === null) throw needSetup(); return out; };
   let port = 0;
-  let job: { kind: string; running: boolean; code: number | null; lines: string[]; child: ChildProcess | null; progress: ProgressEvent | null; startedAt: number; maxOverall: number; summary: string | null; lastOut: string | null } | null = null;
+  let job: { kind: string; running: boolean; code: number | null; lines: string[]; child: ChildProcess | null; progress: ProgressEvent | null; startedAt: number; maxOverall: number; summary: string | null; lastOut: string | null; stopped: boolean } | null = null;
   let chain: Promise<unknown> = Promise.resolve();
   const serial = <T>(fn: () => Promise<T>): Promise<T> => { const r = chain.then(fn, fn); chain = r.catch(() => {}); return r; };
   const jobState = (): JobState | null => {
@@ -102,8 +105,8 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     if (raw !== null) job.maxOverall = Math.max(job.maxOverall, raw);
     const overall = raw === null ? null : job.maxOverall;
     return {
-      kind: job.kind, running: job.running, code: job.code, lines: [...job.lines],
-      summary: job.running ? null : (job.summary ?? job.lastOut),
+      kind: job.kind, running: job.running, code: job.code, lines: [...job.lines], stopped: job.stopped,
+      summary: job.running ? null : job.stopped ? "사용자가 중지함 — 이미 만든 카드는 저장되어 있고, 다음 실행에서 이어서 처리합니다" : (job.summary ?? job.lastOut),
       progress: p ? { ...p, overall, etaSec: job.running ? etaSeconds(overall, Date.now() - job.startedAt) : null } : null,
     };
   };
@@ -129,7 +132,7 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     if (job?.running) throw new HttpError(409, "이미 작업이 실행 중입니다.");
     const args = JOBS[kind];
     if (!args) throw new HttpError(400, "알 수 없는 작업입니다.");
-    const j = { kind, running: true, code: null as number | null, lines: [] as string[], child: null as ChildProcess | null, progress: null as ProgressEvent | null, startedAt: Date.now(), maxOverall: 0, summary: null as string | null, lastOut: null as string | null };
+    const j = { kind, running: true, code: null as number | null, lines: [] as string[], child: null as ChildProcess | null, progress: null as ProgressEvent | null, startedAt: Date.now(), maxOverall: 0, summary: null as string | null, lastOut: null as string | null, stopped: false };
     job = j;
     const push = (l: string, fromStdout = false) => {
       if (l.startsWith(SUMMARY_PREFIX)) { j.summary = l.slice(SUMMARY_PREFIX.length).trim() || null; return; }
@@ -141,7 +144,7 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       if (fromStdout && l.trim()) j.lastOut = l.trim();
       j.lines.push(l); if (j.lines.length > MAX_LINES) j.lines.splice(0, j.lines.length - MAX_LINES);
     };
-    const child = spawn(process.execPath, [o.cliPath, ...args], { cwd: process.cwd(), env: { ...process.env, MP_OUTPUT_DIR: outDir, MP_PROGRESS: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [o.cliPath, ...args], { cwd: process.cwd(), env: { ...process.env, MP_OUTPUT_DIR: outDir, MP_PROGRESS: "1" }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, ...spawnGroupOptions() });
     j.child = child;
     for (const s of [child.stdout!, child.stderr!]) {
       let buf = "";
@@ -275,6 +278,12 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       send(res, 200, { ok: true, removed: removed.length });
     });
     if (path === "/api/job") return serial(async () => { startJob(String(b.kind)); send(res, 200, { ok: true, job: jobState() }); });
+    // 중지: 작업과 에이전트 프로세스 트리를 끝낸다. 끝날 때(close)까지는 계속 실행 중으로 보고 쓰기는 409
+    if (path === "/api/job/stop") {
+      if (!job?.running || !job.child) throw new HttpError(409, "실행 중인 작업이 없습니다.");
+      job.stopped = true; killTree(job.child);
+      return send(res, 200, { ok: true, job: jobState() });
+    }
     // 작업(자식 프로세스)이 카드를 쓰는 동안에는 UI 쓰기를 막는다(서로의 저장이 편집으로 오인되지 않게)
     return serial(async () => {
       // 큐에서 기다리는 동안 작업이 시작됐을 수 있으므로 실행 직전에 검사한다
@@ -378,7 +387,7 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
   return {
     url: `http://127.0.0.1:${port}/?t=${token}`, port,
     close: () => new Promise<void>((ok) => {
-      job?.child?.kill();
+      if (job?.child) killTree(job.child);
       server.close(() => ok());
       server.closeAllConnections();
     }),

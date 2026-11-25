@@ -29,6 +29,8 @@ export function createStageRunner(config: Config, o: {
     scope: stage0(), triage: stage0(), extract: stage0(), judge: stage0(), group: stage0(), review: stage0(), keywords: stage0(),
   };
   const ranStages = new Set<Stage>();
+  /** 단계별 소요 시간(에이전트 시작~종료, 여러 번 띄우면 합산) */
+  const elapsed: Partial<Record<Stage, number>> = {};
   // 예산은 Pro 기준 비율. 내 요금제 창이 planScale배 크면 측정 사용률 기준 예산은 1/planScale(9.8)
   const scale = config.budget.planScale ?? 1;
   const meter = new UsageMeter((o.budget ?? config.budget.fiveHourShare) / scale);
@@ -74,6 +76,7 @@ export function createStageRunner(config: Config, o: {
       // 예산을 이미 다 썼으면 에이전트를 띄우지 않는다(9.8)
       if (meter.exceeded()) return { stopped: budgetStop() };
       progress.begin(stage);
+      const t0 = Date.now();
       const bridge = new AcpBridge(agentForStage(config, stage), { log });
       try {
         try { await bridge.start(); }
@@ -85,12 +88,13 @@ export function createStageRunner(config: Config, o: {
       } finally {
         log(`[permissions denied] ${stage} ${bridge.deniedPermissions}`);
         await bridge.stop();
+        elapsed[stage] = (elapsed[stage] ?? 0) + Date.now() - t0;
       }
     },
     /** 실행한 단계의 [stage …] 줄과, 사용률을 못 받았으면 그 사실을 남긴다 */
     logSummary: () => {
       for (const st of ranStages) {
-        log(`[stage ${st}] model=${modelLabel(st)} batches=${stats[st].batches} prompts=${stats[st].prompts} chars=${stats[st].chars}`);
+        log(`[stage ${st}] model=${modelLabel(st)} batches=${stats[st].batches} prompts=${stats[st].prompts} chars=${stats[st].chars} ms=${elapsed[st] ?? 0}`);
       }
       if (ranStages.size && !meter.hasInfo) log("[usage] 사용률 정보 없음 — 사용량 예산을 적용하지 않았습니다");
     },

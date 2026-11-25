@@ -59,6 +59,7 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
   const foreign = foreignConfigMessage(config.scanFolders);
   if (foreign) { console.error(foreign); return { code: 2, report: null }; }
   const startedAt = isoNow();
+  const startedMs = Date.now();
   const stamp = startedAt.slice(0, 16).replace(/[T:]/g, "-");
   const logDir = join(out, ".mp", "logs");
   const report: ScanReport = {
@@ -98,7 +99,7 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
   const { meter, ranStages, withBridge, budgetHooks, budgetReason, onPromptFor, onBatchFor } = runner;
 
   // 2. 순회: 저장된 폴더 범위 판단(5.5)을 적용한다. 결과 폴더(카드·index·보고서·state)가 스캔 폴더 안에 있어도 다시 분석하지 않는다
-  let walks = await walkScanFolders(config, out);
+  let walks = await walkScanFolders(config, out, log);
 
   // 2-1. 폴더 범위(5.5): 판단이 없는 새 폴더만. 같은 실행의 다른 단계와 사용량 예산을 공유한다(9.8)
   const scopeTargets = await collectScopeFolders(walks.map((w) => ({ root: w.root, entries: w.result.entries })), config, { nameSafe: contentNameCheck(extractorFor) });
@@ -112,7 +113,7 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
       report.scope = r.summary;
       scopeStop = r.stopped;
       // 새 exclude 판단을 적용해 다시 순회한다
-      if (!scopeStop && r.summary.excluded) walks = await walkScanFolders(config, out);
+      if (!scopeStop && r.summary.excluded) walks = await walkScanFolders(config, out, log);
     } else { log("[scope declined] 이번엔 모두 포함"); report.scope = later; }
   }
   if (scopeStop) {
@@ -138,7 +139,9 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
     }
   }
   report.generatedExcluded = generated.size;
+  let t0 = Date.now();
   const pre = await prefilter(entries, state, config.limits, { retriage: opts.retriage, onProgress: (d, t) => progress.local("hash", d, t) });
+  log(`[time] hash ms=${Date.now() - t0} entries=${entries.length} candidates=${pre.candidates.length}`);
   report.changed = pre.changed.map(normalizePath);
   report.skippedLarge = pre.skippedLarge.map((s) => ({ path: normalizePath(s.path), size: s.size }));
   report.unsupported = pre.unsupported;
@@ -157,6 +160,7 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
   for (const k of pre.knownIrrelevant) { state.files[k.key] = irrelevantEntry(k.hash); report.skippedIrrelevant!.push(k.key); }
 
   // 3. 추출·민감정보
+  t0 = Date.now();
   const items: BatchItem[] = []; const byId = new Map<string, Candidate>();
   const triageById = new Map<string, TriageItem>();
   for (const c of pre.candidates) {
@@ -185,6 +189,7 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
     triageById.set(id, { id, relPath, format: c.format, chars: s.text.length, head: headSanitized(s.text, TRIAGE_HEAD_CHARS) });
   }
   await saveState(out, state);
+  log(`[time] text ms=${Date.now() - t0} files=${pre.candidates.length}`);
 
   // --limit은 선별 전에 적용한다(이번 실행에서 에이전트에 보내는 파일 수의 상한)
   const selected = opts.limit && opts.limit > 0 ? items.slice(0, opts.limit) : items;
@@ -361,6 +366,7 @@ export async function runScan(opts: ScanOptions): Promise<{ code: number; report
   const blocked = preStop !== null || declined || extractStop?.kind === "rate_limit" || extractStop?.kind === "auth" || extractStop?.kind === "budget";
   if (!blocked) await judgeStage((k) => !earlier.has(k), !consented);
   runner.logSummary();
+  log(`[time] total ms=${Date.now() - startedMs}`);
   report.usage = {
     tokens: meter.tokens, share: meter.share, scale: config.budget.planScale ?? 1,
     fiveHour: meter.hasInfo ? { start: meter.start!, last: meter.last!.utilization, spent: meter.spent(), resetsAt: meter.resetsAt } : null,

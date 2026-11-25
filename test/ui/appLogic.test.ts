@@ -96,6 +96,9 @@ describe("setup & settings logic (11.6)", () => {
     const g = L.groupFolders([F("/k", "keyword"), F("/d", "desktop"), F("/x", "weird"), F("/o", "cloud"), F("/dl", "downloads")]);
     expect(g.map((x) => [x.key, x.items.map((i) => i.path)])).toEqual([["manual", ["/x"]], ["base", ["/d", "/dl"]], ["cloud", ["/o"]], ["keyword", ["/k"]]]);
     expect(L.newSuggestions([F("/a"), F("/b")], ["/a/"]).map((f) => f.path)).toEqual(["/b"]);
+    // WSL: \\wsl$\ 와 \\wsl.localhost\ 는 같은 폴더
+    expect(L.newSuggestions([F("\\\\wsl.localhost\\Ubuntu\\home\\yh\\projects", "wsl")], ["\\\\wsl$\\Ubuntu\\home\\yh\\projects\\"])).toEqual([]);
+    expect(L.groupFolders([F("/w", "wsl"), F("/k", "keyword")]).map((x: any) => x.key)).toEqual(["wsl", "keyword"]);
   });
 
   it("wizardErrors and setupPayload", () => {

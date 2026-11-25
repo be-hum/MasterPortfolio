@@ -144,4 +144,34 @@ describe("prefilter", () => {
     expect(r.candidates).toEqual([]);
     expect(r.knownDuplicates).toEqual([{ path: b.path, key: normalizePath(b.path), hash: await sha256File(b.path), card: "files/a.md" }]);
   });
+
+  it("hash cache: unchanged size+mtime skips reading; a change is still detected", async () => {
+    const d = await tmp();
+    const long = "나".repeat(300);
+    const a = { ...(await file(d, "a.md", long)), mtimeMs: 1000 };
+    const b = { ...(await file(d, "b.md", long + "x")), mtimeMs: 2000 };
+    const st: any = { schema_version: 1, files: {}, last_scan: null };
+    const calls: string[] = [];
+    const hashFile = async (p: string) => { calls.push(p); return sha256File(p); };
+    await prefilter([a, b], st, limits, { hashFile });
+    expect(calls).toHaveLength(2);
+    const ka = normalizePath(a.path);
+    expect(st.hash_cache[ka]).toEqual({ hash: await sha256File(a.path), size: a.size, mtime_ms: 1000 });
+    // a는 카드가 있는 파일로 기록
+    st.files[ka] = { source_hash: st.hash_cache[ka].hash, card: "c.md", card_body_hash: null, card_snapshot: null, status: "done" };
+    calls.length = 0;
+    const r2 = await prefilter([a, b], st, limits, { hashFile });
+    expect(calls).toEqual([]);
+    expect(r2.candidates.map((c) => c.path)).toEqual([b.path]);
+    // a의 내용이 바뀜(수정 시각도 바뀜) → 다시 읽고 changed로 알린다
+    await writeFile(a.path, long + "changed");
+    const a2 = { ...a, size: a.size + 7, mtimeMs: 3000 };
+    calls.length = 0;
+    const r3 = await prefilter([a2, b], st, limits, { hashFile });
+    expect(calls).toEqual([a.path]);
+    expect(r3.changed).toEqual([a.path]);
+    // 사라진 파일은 캐시에서 빠진다
+    await prefilter([b], st, limits, { hashFile });
+    expect(Object.keys(st.hash_cache)).toEqual([normalizePath(b.path)]);
+  });
 });

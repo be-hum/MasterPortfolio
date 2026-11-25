@@ -895,13 +895,21 @@ function startJob(kind) {
     render(); ensurePoll();
   }, netErr);
 }
+function stopJob() {
+  if (!busy() || S.job.stopped) return;
+  api("POST", "/api/job/stop", {}).then(function (r) {
+    if (!r.ok) { toast(errMsg(r), "err"); return; }
+    S.job = r.json.job; renderJob();
+  }, netErr);
+}
 function ensurePoll() { if (S.polling) return; S.polling = true; setTimeout(tick, 1000); }
 function tick() {
   api("GET", "/api/job").then(function (r) {
     if (r.ok) S.job = r.json.job;
     if (S.job && S.job.running) { renderJob(); setTimeout(tick, 1000); return; }
     S.polling = false;
-    if (S.job) {
+    if (S.job && S.job.stopped) toast(JOB_LABEL[S.job.kind] + " 중지 — " + S.job.summary);
+    else if (S.job) {
       var okd = S.job.code === 0;
       toast(JOB_LABEL[S.job.kind] + (okd ? " 완료" + (S.job.summary ? " — " + S.job.summary : "") : " 실패(코드 " + S.job.code + ") — " + (S.job.summary || "로그를 확인하세요")), okd ? null : "err");
       if (!okd) S.showLog = true;
@@ -933,10 +941,13 @@ function renderJob() {
     } else {
       left.appendChild(el("span", { class: "jb-line", text: j.lines.length ? j.lines[j.lines.length - 1] : "" }));
     }
+    left.appendChild(el("button", { type: "button", class: "btn danger", "data-k": "job:stop", disabled: !!j.stopped,
+      title: "작업과 에이전트를 멈춥니다. 이미 만든 카드는 저장되어 있고 다음 실행에서 이어서 처리합니다",
+      onclick: stopJob, text: j.stopped ? "중지하는 중…" : "중지" }));
   } else {
     left.appendChild(el("span", {}, ["반영 대기 ", el("strong", { text: String(pend) }), "개"]));
-    if (j) left.appendChild(el("span", { class: "jb-last " + (j.code === 0 ? "ok" : "err"), title: j.summary || "",
-      text: "최근: " + (JOB_LABEL[j.kind] || j.kind) + (j.code === 0 ? " 완료" : " 실패(코드 " + j.code + ")") + (j.summary ? " — " + j.summary : "") }));
+    if (j) left.appendChild(el("span", { class: "jb-last " + (j.code === 0 || j.stopped ? "ok" : "err"), title: j.summary || "",
+      text: "최근: " + (JOB_LABEL[j.kind] || j.kind) + (j.stopped ? " 중지" : j.code === 0 ? " 완료" : " 실패(코드 " + j.code + ")") + (j.summary ? " — " + j.summary : "") }));
   }
   if (j && j.lines.length) left.appendChild(el("button", { type: "button", class: "linklike", "data-k": "log", "aria-expanded": String(S.showLog),
     onclick: function () { S.showLog = !S.showLog; renderJob(); }, text: S.showLog ? "로그 닫기" : "로그 보기" }));

@@ -27,6 +27,8 @@ export type PrefilterOptions = {
   onProgress?: (done: number, total: number) => void;
   /** `mp scan --retriage`: skipped_irrelevant 파일을 다시 후보로 넣는다(9.7 E) */
   retriage?: boolean;
+  /** 테스트용: 파일 해시 함수 */
+  hashFile?: (path: string) => Promise<string>;
 };
 
 export async function prefilter(entries: WalkEntry[], state: State, limits: Config["limits"], opts: PrefilterOptions = {}): Promise<PrefilterResult> {
@@ -38,6 +40,10 @@ export async function prefilter(entries: WalkEntry[], state: State, limits: Conf
     if (f.status === "done" && f.card && !cardByHash.has(f.source_hash)) cardByHash.set(f.source_hash, f.card);
   }
   const irrelevantHashes = new Set(opts.retriage ? [] : Object.values(state.files).filter((f) => f.status === "skipped_irrelevant").map((f) => f.source_hash));
+  // 해시 캐시: 크기·수정 시각이 지난번과 같으면 파일을 읽지 않는다. 이번에 해시를 본 파일로 새로 채운다(사라진 파일은 빠짐)
+  const oldCache = state.hash_cache ?? {};
+  const cache: NonNullable<State["hash_cache"]> = {};
+  const hashFile = opts.hashFile ?? sha256File;
   let seen = 0;
   for (const e of entries) {
     if (++seen % 50 === 0) opts.onProgress?.(seen, entries.length);
@@ -46,9 +52,12 @@ export async function prefilter(entries: WalkEntry[], state: State, limits: Conf
     if (!format) { res.unsupported++; continue; }
     if (e.size > limits.maxFileBytes) { res.skippedLarge.push({ path: e.path, size: e.size }); continue; }
     if ((format === "md" || format === "txt") && e.size < limits.minTextBytes) continue;
-    let hash: string;
-    try { hash = await sha256File(e.path); } catch { continue; }
     const key = normalizePath(e.path);
+    const hit = oldCache[key];
+    let hash: string;
+    if (hit && hit.size === e.size && hit.mtime_ms === e.mtimeMs) hash = hit.hash;
+    else { try { hash = await hashFile(e.path); } catch { continue; } }
+    cache[key] = { hash, size: e.size, mtime_ms: e.mtimeMs };
     const known = state.files[key];
     if (known) {
       if (known.source_hash !== hash) { res.changed.push(e.path); continue; }
@@ -68,5 +77,6 @@ export async function prefilter(entries: WalkEntry[], state: State, limits: Conf
     res.candidates.push(c);
   }
   opts.onProgress?.(entries.length, entries.length);
+  state.hash_cache = cache;
   return res;
 }

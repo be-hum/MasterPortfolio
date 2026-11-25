@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defaultOutputDir, suggestFolders } from "../../src/setup/folders.js";
+import { defaultOutputDir, suggestFolders, WSL_KEYWORDS } from "../../src/setup/folders.js";
+import { parseWslList, wslHomes } from "../../src/setup/wsl.js";
 
 const set = (...p: string[]) => (x: string) => p.includes(x);
 
@@ -12,6 +13,7 @@ describe("suggestFolders", () => {
       exists: set("C:\\Users\\u\\OneDrive - Univ\\Documents", "C:\\Users\\u\\Desktop", "C:\\Users\\u\\Downloads", "C:\\Users\\u\\OneDrive - Univ", "C:\\Users\\u\\OneDrive - Other", "C:\\", "D:\\", "E:\\"),
       listDir: (p) => p === home ? ["OneDrive - Univ", "OneDrive - Other", "x"] : [],
       candidates: async () => ["C:\\Users\\u\\proj", "C:\\Users\\u\\Downloads\\sub", "C:\\Users\\u\\desktop"],
+      wslHomes: async () => [],
     });
     expect(r.map((s) => [s.kind, s.checked])).toEqual([
       ["documents", true], ["downloads", true], ["desktop", true], ["cloud", false], ["drive", false], ["drive", false], ["keyword", false],
@@ -38,6 +40,48 @@ describe("suggestFolders", () => {
   it("linux has no drives", async () => {
     const r = await suggestFolders([], { home: "/h", platform: "linux", exists: set("/h/Documents"), listDir: () => [], candidates: async () => [] });
     expect(r.map((s) => s.kind)).toEqual(["documents"]);
+  });
+});
+
+describe("WSL folders (win32)", () => {
+  const base = { home: "C:\\Users\\u", platform: "win32" as const, systemDrive: "C:", winFolder: async () => null, exists: () => false, listDir: () => [], candidates: async () => [] };
+
+  it("suggests project-like folders inside each WSL home (checked, labeled), never the home itself", async () => {
+    const seen: string[][] = [];
+    const r = await suggestFolders(["연세대"], {
+      ...base,
+      wslHomes: async () => [{ distro: "Ubuntu", home: "\\\\wsl.localhost\\Ubuntu\\home\\yh" }],
+      wslCandidates: async (h, kw) => { seen.push(kw); return [h, h + "\\projects", h + "\\work\\portfolio"]; },
+    });
+    expect(r.map((s) => [s.kind, s.checked, s.label, s.path])).toEqual([
+      ["wsl", true, "WSL(Ubuntu): ~/projects", "\\\\wsl.localhost\\Ubuntu\\home\\yh\\projects"],
+      ["wsl", true, "WSL(Ubuntu): ~/work/portfolio", "\\\\wsl.localhost\\Ubuntu\\home\\yh\\work\\portfolio"],
+    ]);
+    expect(seen[0]).toEqual([...WSL_KEYWORDS, "연세대"]);
+  });
+
+  it("a slow or failing WSL is skipped", async () => {
+    const slow = await suggestFolders([], { ...base, wslTimeoutMs: 30, wslHomes: () => new Promise(() => {}) });
+    expect(slow).toEqual([]);
+    const bad = await suggestFolders([], { ...base, wslHomes: async () => { throw new Error("x"); } });
+    expect(bad).toEqual([]);
+  });
+
+  it("not searched on other platforms", async () => {
+    let called = false;
+    await suggestFolders([], { home: "/h", platform: "linux", exists: () => false, listDir: () => [], candidates: async () => [], wslHomes: async () => { called = true; return []; } });
+    expect(called).toBe(false);
+  });
+
+  it("parses wsl -l -q output (UTF-16LE with NULs) and drops docker-desktop", () => {
+    const buf = Buffer.from("\uFEFFUbuntu-26.04\r\ndocker-desktop\r\nDebian\r\n\r\n", "utf16le");
+    expect(parseWslList(buf)).toEqual(["Ubuntu-26.04", "Debian"]);
+    expect(parseWslList("Ubuntu\n")).toEqual(["Ubuntu"]);
+  });
+
+  it("wslHomes lists users under each distro's /home; unreachable distros are skipped", async () => {
+    const r = await wslHomes(async () => ["A", "B"], async (p) => { if (p.includes("\\B\\")) throw new Error("off"); return ["z", "yh"]; });
+    expect(r).toEqual([{ distro: "A", home: "\\\\wsl.localhost\\A\\home\\yh" }, { distro: "A", home: "\\\\wsl.localhost\\A\\home\\z" }]);
   });
 });
 

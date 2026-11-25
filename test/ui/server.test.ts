@@ -208,6 +208,28 @@ describe("mp ui server (11.5)", () => {
     expect(job.summary).toBe("새로 분석할 자료 없음 · 크기 초과 1개");
   });
 
+  it("stop: ends the job and its child processes (agent tree), reports stopped, and 409 when nothing runs", async () => {
+    const dir = await mkTmp("mp-stub-"); dirs.push(dir);
+    const stub = join(dir, "stub.mjs");
+    // 에이전트 어댑터처럼 손자 프로세스를 띄우고 그 pid를 알린 뒤 계속 실행
+    await writeFile(stub, `import { spawn } from "node:child_process"; const g = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], { stdio: "ignore" }); console.log("grandchild " + g.pid); setInterval(() => {}, 1000);`);
+    const { call } = await setup(stub);
+    expect((await call("POST", "/api/job/stop", {})).status).toBe(409);
+    await call("POST", "/api/job", { kind: "scan" });
+    let job: any, gpid = 0;
+    for (let i = 0; i < 100 && !gpid; i++) { job = (await call("GET", "/api/job")).json.job; const l = job.lines.find((x: string) => x.startsWith("grandchild ")); if (l) gpid = Number(l.split(" ")[1]); else await new Promise((r) => setTimeout(r, 30)); }
+    expect(gpid).toBeGreaterThan(0);
+    const st = await call("POST", "/api/job/stop", {});
+    expect(st.status).toBe(200);
+    expect(st.json.job.stopped).toBe(true);
+    for (let i = 0; i < 200; i++) { job = (await call("GET", "/api/job")).json.job; if (!job.running) break; await new Promise((r) => setTimeout(r, 30)); }
+    expect(job.running).toBe(false);
+    expect(job.summary).toContain("중지");
+    const alive = () => { try { process.kill(gpid, 0); return true; } catch { return false; } };
+    for (let i = 0; i < 100 && alive(); i++) await new Promise((r) => setTimeout(r, 30));
+    expect(alive()).toBe(false);
+  });
+
   it("job: runs a child, keeps the last 200 lines, and rejects a second start with 409", async () => {
     const dir = await mkTmp("mp-stub-"); dirs.push(dir);
     const stub = join(dir, "stub.mjs");

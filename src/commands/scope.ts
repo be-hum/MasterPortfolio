@@ -119,12 +119,16 @@ export function scopeStopReason(stop: Stop, runner: StageRunner, agent: string, 
 }
 
 /** 모든 스캔 폴더를 현재 판단으로 순회한다(결과 폴더 제외). */
-export async function walkScanFolders(config: Config, out: string) {
+export async function walkScanFolders(config: Config, out: string, log?: (line: string) => void) {
   const excludeRoots = [resolve(out)];
   const walks: { root: string; result: Awaited<ReturnType<typeof walk>> }[] = [];
   let found = 0;
   const onFile = () => { if (++found % 200 === 0) progress.local("walk", found, 0); };
-  for (const root of config.scanFolders) walks.push({ root, result: await walk(root, { excludeRoots, scope: config.scope.decisions, onFile }) });
+  for (const root of config.scanFolders) {
+    const t = Date.now();
+    walks.push({ root, result: await walk(root, { excludeRoots, scope: config.scope.decisions, onFile }) });
+    log?.(`[time] walk ${root} ms=${Date.now() - t} files=${walks[walks.length - 1].result.entries.length}`);
+  }
   progress.local("walk", found, found);
   return walks;
 }

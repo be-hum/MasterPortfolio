@@ -198,5 +198,10 @@ export const State = z.object({
   files: z.record(StateEntry),
   experiences: z.record(ExperienceStateEntry).default({}),
   last_scan: z.string().nullable(),
+  /**
+   * 해시 캐시(속도): 지난 스캔에서 해시를 계산한 파일의 크기·수정 시각. 둘 다 같으면 파일을 다시 읽지 않고 이 해시를 쓴다.
+   * files와 따로 두어 카드 상태와 무관하게 동작하고, 매 스캔 이번에 본 파일로 새로 쓴다.
+   */
+  hash_cache: z.record(z.object({ hash: z.string(), size: z.number(), mtime_ms: z.number() })).optional(),
 });
 export type State = z.infer<typeof State>;
