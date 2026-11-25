@@ -13,6 +13,7 @@ import { clampKeywords } from "../analyzer/keywords.js";
 import { buildUiState, loadFileTitles } from "./model.js";
 import { suggestFolders, defaultOutputDir } from "../setup/folders.js";
 import { createSetupConfig, normalizeFolderInput, validateSetup, SetupError } from "../setup/config.js";
+import { pathKey } from "../core/paths.js";
 import { checkEnvironment } from "../setup/check.js";
 import { pickFolder, PickUnavailable } from "../setup/pickFolder.js";
 import { expandUniversity } from "../discovery/universities.js";
@@ -163,9 +164,19 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     const c = await loadConfig(dir);
     if (b.scanFolders !== undefined) {
       if (!Array.isArray(b.scanFolders) || !b.scanFolders.every((x) => typeof x === "string")) throw new HttpError(400, "scanFolders는 문자열 목록이어야 합니다.");
-      const v = await validateSetup({ university: c.university.input, keywords: c.university.keywords, folders: b.scanFolders as string[], planScale: 1, output: dir });
-      if (!v.ok) throw new HttpError(400, v.errors[0], { errors: v.errors });
-      c.scanFolders = v.folders;
+      // 이미 설정에 있던 폴더는 다시 검사하지 않는다(예: WSL이 꺼져 있으면 \\wsl.localhost 폴더가 일시적으로 안 보임). 새로 추가한 폴더만 엄격히 검사
+      const known = new Set(c.scanFolders.map((f) => pathKey(f)));
+      const list = b.scanFolders as string[];
+      const added = list.filter((f) => { const n = normalizeFolderInput(f); return !!n && !known.has(pathKey(n)); });
+      const kept = c.scanFolders.filter((f) => list.some((x) => { const n = normalizeFolderInput(x); return !!n && pathKey(n) === pathKey(f); }));
+      if (!kept.length && !added.length) throw new HttpError(400, "스캔할 폴더를 하나 이상 고르세요");
+      let addedOk: string[] = [];
+      if (added.length) {
+        const v = await validateSetup({ university: c.university.input, keywords: c.university.keywords, folders: added, planScale: 1, output: dir });
+        if (!v.ok) throw new HttpError(400, v.errors[0], { errors: v.errors });
+        addedOk = v.folders;
+      }
+      c.scanFolders = [...kept, ...addedOk.filter((f) => !kept.some((k) => pathKey(k) === pathKey(f)))];
     }
     if (b.planScale !== undefined) {
       if (![1, 5, 20].includes(b.planScale as number)) throw new HttpError(400, "요금제 배수는 1, 5, 20 중 하나여야 합니다");

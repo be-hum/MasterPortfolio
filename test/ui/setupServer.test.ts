@@ -136,6 +136,20 @@ describe("settings API (11.6)", () => {
     return { scan, out, ...(await boot(out)) };
   }
 
+  it("a folder already in the config is kept even if it is currently unreachable (e.g. WSL off); only new ones are checked", async () => {
+    const { scan, out, call } = await normal();
+    const c = await loadConfig(out);
+    const offline = join(scan, "offline-share"); // 없는 폴더 = 지금은 안 보이는 기존 폴더
+    c.scanFolders = [scan, offline]; await saveConfig(out, c);
+    const extra = await tmp();
+    const r = await call("POST", "/api/settings", { scanFolders: [scan, offline, extra] });
+    expect(r.status).toBe(200);
+    expect((await loadConfig(out)).scanFolders).toEqual([scan, offline, extra]);
+    expect((await call("POST", "/api/settings", { scanFolders: [offline] })).status).toBe(200);
+    expect((await loadConfig(out)).scanFolders).toEqual([offline]);
+    expect((await call("POST", "/api/settings", { scanFolders: [offline, join(scan, "새로-없는")] })).status).toBe(400);
+  });
+
   it("GET returns settings; POST saves planScale and a new folder", async () => {
     const { scan, out, call } = await normal();
     const g = await call("GET", "/api/settings");
