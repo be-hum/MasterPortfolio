@@ -10,7 +10,7 @@ export type ScanReport = {
   knownDuplicates?: { path: string; card: string }[];
   /** 2단계(판정) 결과 (9.6). judged: 이번 스캔에서 판정한 카드 수, unjudged: 남은 미판정 카드 수 */
   judgement?: { judged: number; unjudged: number; skippedEdited: string[] };
-  /** 아직 읽지 못하는 문서 형식(HWP·DOC·PPT) — PDF로 내보내면 분석 가능 */
+  /** 내용 분석을 지원하지 않는 문서 형식(HWP·DOC·PPT) — 위치만 기록 */
   unreadable?: string[];
   /** 생성물로 보여 순회에서 제외한 폴더·파일 수 (9.7 B) */
   generatedExcluded?: number;
@@ -70,7 +70,7 @@ export async function writeScanReport(outputDir: string, r: ScanReport): Promise
     ...sec("추출 실패", r.extractFailed.map((s) => `- ${one(s.path)} — ${one(s.reason)}`)),
     ...sec("분석 실패", r.analysisFailed.map((p) => `- ${one(p)}`)),
     ...sec("접근 불가", r.inaccessible.map((p) => `- ${one(p)}`)),
-    ...sec("아직 읽지 못하는 형식 — PDF로 내보내 같은 폴더에 두면 다음 스캔에서 분석합니다", (r.unreadable ?? []).map((p) => `- \`${base(p)}\` — ${one(p)}`)),
+    ...sec("내용 분석을 지원하지 않는 형식(HWP·DOC·PPT) — 위치만 기록합니다. PDF(한글은 HWPX, Word는 DOCX도)로 저장해 두면 다음 스캔에서 분석합니다", (r.unreadable ?? []).map((p) => `- \`${base(p)}\` — ${one(p)}`)),
     `미지원 형식: ${r.unsupported}개`, "",
     ...(r.generatedExcluded ? [`생성물로 보여 제외 ${r.generatedExcluded}개`, ""] : []),
   ];

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { prefilter } from "../../src/scan/prefilter.js";
+import { prefilter, SUPPORTED_EXT, UNREADABLE_DOC_EXT } from "../../src/scan/prefilter.js";
 import { defaultConfig } from "../../src/config/config.js";
 import { sha256File } from "../../src/core/hash.js";
 import { normalizePath } from "../../src/core/paths.js";
@@ -29,7 +29,7 @@ describe("prefilter", () => {
       await file(d, "b.md", long),             // duplicate of a.md
       await file(d, "tiny.txt", "short"),      // < 200 bytes
       await file(d, "pic.png", "x"),           // unsupported
-      await file(d, "보고서.hwp", "x"),         // unsupported, but a document we can't read yet
+      await file(d, "보고서.hwp", "x"),         // unsupported: location only (binary HWP)
       { kind: "file" as const, path: join(d, "huge.pdf"), size: 60_000_000, mtimeMs: 0 },
       { kind: "repo" as const, path: join(d, "repo") }, // M1: unsupported
     ];
@@ -175,5 +175,12 @@ describe("prefilter", () => {
     // 사라진 파일은 캐시에서 빠진다
     await prefilter([b], st, limits, { hashFile });
     expect(Object.keys(st.hash_cache)).toEqual([normalizePath(b.path)]);
+  });
+
+  it("HWPX is analysed; HWP (binary) is location-only", () => {
+    expect(SUPPORTED_EXT[".hwpx"]).toBe("hwpx");
+    expect(SUPPORTED_EXT[".hwp"]).toBeUndefined();
+    expect(UNREADABLE_DOC_EXT.has(".hwp")).toBe(true);
+    expect(UNREADABLE_DOC_EXT.has(".hwpx")).toBe(false);
   });
 });

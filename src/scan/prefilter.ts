@@ -8,7 +8,7 @@ import { normalizePath } from "../core/paths.js";
 export type Format = (typeof FORMATS)[number];
 
 export const SUPPORTED_EXT: Record<string, Format> = {
-  ".pdf": "pdf", ".docx": "docx", ".pptx": "pptx", ".md": "md", ".txt": "txt",
+  ".pdf": "pdf", ".docx": "docx", ".pptx": "pptx", ".hwpx": "hwpx", ".md": "md", ".txt": "txt",
 };
 
 export type Candidate = {
@@ -20,12 +20,12 @@ export type PrefilterResult = {
   knownDuplicates: { path: string; key: string; hash: string; card: string }[];
   /** 선별(triage)에서 drop된 내용과 같은 새 경로(다시 보내지 않음, 9.7 E) */
   knownIrrelevant: { path: string; key: string; hash: string }[];
-  /** 문서지만 아직 읽지 못하는 형식(HWP·옛 Office): PDF로 내보내면 분석할 수 있다고 알린다 */
+  /** 문서지만 내용을 읽지 못하는 형식(옛 바이너리 HWP·옛 Office): 위치만 기록하고 PDF 등으로 저장하면 분석된다고 알린다 */
   unreadable: string[];
 };
 
-/** 이력서 자료일 수 있지만 아직 텍스트를 뽑지 못하는 문서 형식 */
-export const UNREADABLE_DOC_EXT = new Set([".hwp", ".hwpx", ".doc", ".ppt"]);
+/** 이력서 자료일 수 있지만 텍스트를 뽑지 않는 문서 형식(HWP는 위치만 지원, HWPX는 내용까지 지원) */
+export const UNREADABLE_DOC_EXT = new Set([".hwp", ".doc", ".ppt"]);
 
 export type PrefilterOptions = {
   /** 진행률 표시용: 확인한 항목 수 / 전체 */

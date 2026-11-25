@@ -402,7 +402,7 @@ export function scanSummary(r: ScanReport): string {
   if (ur.length) {
     const by = new Map<string, number>();
     for (const p of ur) { const e = (p.match(/\.([^./\\]+)$/)?.[1] ?? "").toUpperCase(); by.set(e, (by.get(e) ?? 0) + 1); }
-    parts.push(`읽지 못한 ${[...by].map(([e, c]) => `${e} ${c}개`).join("·")}(PDF로 내보내면 분석)`);
+    parts.push(`내용 분석 미지원 ${[...by].map(([e, c]) => `${e} ${c}개`).join("·")}(위치만 기록 · PDF·HWPX·DOCX로 저장하면 분석)`);
   }
   if (!r.created.length && !r.judgement?.judged) parts.unshift("새로 분석할 자료 없음");
   if (r.stoppedReason) parts.push(`중단: ${r.stoppedReason.split(/[—.]/)[0].trim()}`);

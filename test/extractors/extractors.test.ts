@@ -130,4 +130,40 @@ describe("extractors", () => {
   it("docx: missing file is error, not corrupted", async () => {
     expect(await extractorFor("docx")!.extract("/no/such/file.docx")).toMatchObject({ ok: false, reason: "error" });
   });
+
+  it("hwpx: sections in numeric order, one line per paragraph, table cells and entities, nothing from other parts", async () => {
+    const d = await mkTmp(); const p = join(d, "a.hwpx");
+    const z = new JSZip();
+    z.file("mimetype", "application/hwp+zip");
+    z.file("Contents/header.xml", "<hh:head><hh:fontface>머리-글꼴</hh:fontface></hh:head>");
+    const sec = (body: string) => `<?xml version="1.0"?><hs:sec xmlns:hp="x" xmlns:hs="y">${body}</hs:sec>`;
+    z.file("Contents/section0.xml", sec(
+      `<hp:p id="1"><hp:run><hp:t>졸업 프로젝트 &amp; 보고서</hp:t></hp:run></hp:p>` +
+      `<hp:p><hp:run><hp:t>성과:<hp:tab/>정확도 92%</hp:t><hp:t charPrIDRef="3"> 달성</hp:t></hp:run></hp:p>` +
+      `<hp:p><hp:run><hp:tbl><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>표-셀</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p>` +
+      `<hp:p><hp:run><hp:t/></hp:run></hp:p>`));
+    z.file("Contents/section10.xml", sec(`<hp:p><hp:run><hp:t>열번째 구역</hp:t></hp:run></hp:p>`));
+    z.file("Contents/section2.xml", sec(`<hp:p><hp:run><hp:t>둘째 구역 &#xAC00;&#44032;</hp:t></hp:run></hp:p>`));
+    await writeFile(p, await z.generateAsync({ type: "nodebuffer" }));
+    const r = await extractorFor("hwpx")!.extract(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.text).toContain("졸업 프로젝트 & 보고서");
+    expect(r.text).toMatch(/성과: +정확도 92% 달성/);
+    expect(r.text).toContain("표-셀");
+    expect(r.text).toContain("둘째 구역 가가");
+    expect(r.text.indexOf("둘째 구역")).toBeLessThan(r.text.indexOf("열번째 구역"));
+    expect(r.text).not.toContain("머리-글꼴");
+    expect(r.meta.pages).toBe(3);
+  });
+
+  it("hwpx: no sections is corrupted, OLE (old HWP renamed or encrypted) is encrypted", async () => {
+    const d = await mkTmp();
+    const z = new JSZip(); z.file("mimetype", "application/hwp+zip");
+    await writeFile(join(d, "e.hwpx"), await z.generateAsync({ type: "nodebuffer" }));
+    expect(await extractorFor("hwpx")!.extract(join(d, "e.hwpx"))).toMatchObject({ ok: false, reason: "corrupted" });
+    await writeFile(join(d, "o.hwpx"), Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(100)]));
+    expect(await extractorFor("hwpx")!.extract(join(d, "o.hwpx"))).toMatchObject({ ok: false, reason: "encrypted" });
+    expect(extractorFor("hwp")).toBeNull();
+  });
 });
