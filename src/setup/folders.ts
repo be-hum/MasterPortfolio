@@ -112,7 +112,7 @@ export async function suggestFolders(keywords: string[], deps: FolderDeps = {}):
  * WSL이 있으면 각 배포판의 사용자 홈 안에서 자료가 있을 만한 폴더(projects·portfolio 등, 깊이 2)를 찾는다.
  * 홈 전체는 넣지 않는다. 찾은 폴더는 기본 체크(화면에서 알리고 끌 수 있음). 시간이 오래 걸리면 건너뛴다.
  */
-async function wslSuggestions(keywords: string[], deps: FolderDeps): Promise<{ path: string; label: string }[]> {
+export async function wslSuggestions(keywords: string[], deps: FolderDeps): Promise<{ path: string; label: string }[]> {
   const homes = deps.wslHomes ?? (() => realWslHomes());
   const find = deps.wslCandidates ?? ((h, kw) => findCandidateFolders(h, kw, 2, { home: h, platform: "win32" }));
   const work = (async () => {

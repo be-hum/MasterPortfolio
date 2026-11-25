@@ -186,7 +186,9 @@ function setupPayload(w) {
     university: String(w.university || "").trim(),
     keywords: w.keywords.filter(function (k) { return k.checked; }).map(function (k) { return k.text; }),
     folders: w.folders.filter(function (f) { return f.checked; }).map(function (f) { return f.path; }),
-    planScale: w.planScale, output: String(w.output || "").trim()
+    planScale: w.planScale, output: String(w.output || "").trim(),
+    // 체크를 끈 WSL 제안은 메인 화면에서 다시 묻지 않는다
+    dismissed: w.folders.filter(function (f) { return f.kind === "wsl" && !f.checked; }).map(function (f) { return f.path; })
   };
 }
 /** 예산 비율 % 입력 → 0.05~1 (숫자가 아니면 null) */

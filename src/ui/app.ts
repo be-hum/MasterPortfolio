@@ -107,6 +107,10 @@ button:disabled{cursor:not-allowed;opacity:.5}
 .topbar .btn{margin-left:auto}
 
 /* 일괄 결정 */
+.hintbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 8px;padding:10px 12px;background:var(--warn-bg);color:var(--warn-ink);border-radius:10px;font-size:13px}
+.hintbar p{margin:0;flex:1 1 280px}
+.hintbar .hb-list{display:block;margin-top:2px;font:12px/1.5 ui-monospace,"D2Coding",Consolas,monospace;overflow-wrap:anywhere}
+.hintbar .hb-btns{display:flex;flex-wrap:wrap;gap:6px}
 .bulk{position:sticky;top:62px;z-index:9;display:flex;align-items:center;gap:10px;margin:0 0 6px;padding:8px 12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 1px 2px rgba(16,24,40,.05)}
 .bulk[hidden]{display:none}
 .bulk-all{display:inline-flex;align-items:center;gap:6px;font-size:13px}
@@ -296,7 +300,7 @@ var DEFAULT_STATUSES = LIVE ? ["pending", "adopted"] : null;
 var DECISIONS = [["adopted", "채택"], ["held", "보류"], ["excluded", "제외"]];
 
 var S = {
-  exps: [], output: "", generatedAt: "", job: null, loading: LIVE, error: null,
+  exps: [], output: "", generatedAt: "", job: null, loading: LIVE, error: null, hints: null, hintsAsked: false,
   view: "category", statuses: DEFAULT_STATUSES ? DEFAULT_STATUSES.slice() : null, contribs: [], q: "", todo: null,
   sel: null, open: null, order: [], activeG: null, checked: {}, skipped: {}, drafts: {},
   editing: false, form: null, form0: null, fileView: null, showLog: false, polling: false, menu: false
@@ -363,6 +367,7 @@ function load() {
     else {
       S.error = null; S.exps = r.json.experiences || []; S.output = r.json.output || ""; S.job = r.json.job || null;
       if (busy()) ensurePoll();
+      if (!S.hintsAsked) { S.hintsAsked = true; fetchHints(); }
     }
     renderPrint(); render();
     if (S.settings) renderSettings(); // 작업이 끝나면 저장·초기화 버튼을 다시 켠다
@@ -390,7 +395,7 @@ function render() {
     S.order = [];
     groups.forEach(function (g) { g.items.forEach(function (e) { S.order.push(e.rel); }); });
     if (S.activeG && !groups.some(function (g) { return g.key === S.activeG; })) S.activeG = null;
-    renderSide(groups); renderTop(vis); renderBulk(vis); renderList(groups); renderPanel(); renderJob();
+    renderSide(groups); renderTop(vis); renderBulk(vis); renderList(groups); renderPanel(); renderJob(); renderHints();
     $("app").classList.toggle("panel-open", !!S.open);
   });
   markToc(); observe();
@@ -885,6 +890,40 @@ function shutdown() {
   }, netErr);
 }
 
+/* ---------- 새 폴더 제안(WSL 등): 화면을 열 때 한 번 ---------- */
+function fetchHints() {
+  api("GET", "/api/folder-hints").then(function (r) {
+    if (r.ok && r.json.folders && r.json.folders.length) { S.hints = r.json.folders; renderHints(); }
+  }, function () { /* 제안은 없어도 된다 */ });
+}
+function answerHints(add) {
+  var paths = (S.hints || []).map(function (h) { return h.path; });
+  api("POST", "/api/folder-hints", add ? { add: paths } : { dismiss: paths }).then(function (r) {
+    if (!r.ok) { toast(errMsg(r), "err"); return; }
+    S.hints = null; renderHints();
+    toast(add ? "스캔 폴더에 " + r.json.added + "개를 추가했습니다 · [새 자료 스캔]을 누르면 탐색합니다" : "이 폴더들은 다시 묻지 않습니다(⚙ 설정의 [제안 보기]에서 추가할 수 있음)");
+    if (S.settings) fetchSettings(false, false);
+  }, netErr);
+}
+function renderHints() {
+  var H = $("hintbar");
+  if (!H) return;
+  var list = S.hints || [];
+  H.hidden = !list.length;
+  clear(H);
+  if (!list.length) return;
+  H.appendChild(el("p", {}, [
+    el("strong", { text: "WSL(리눅스)에서 자료가 있을 만한 새 폴더 " + list.length + "개를 찾았습니다." }),
+    " 스캔 대상에 넣을까요?",
+    el("span", { class: "hb-list", text: list.map(function (h) { return h.label; }).join(" · ") })
+  ]));
+  H.appendChild(el("div", { class: "hb-btns" }, [
+    el("button", { type: "button", class: "btn sm primary", "data-k": "hint:add", disabled: busy(), title: busy() ? "작업이 끝난 뒤 추가할 수 있습니다" : null, onclick: function () { answerHints(true); }, text: "스캔 대상에 추가" }),
+    el("button", { type: "button", class: "btn sm", "data-k": "hint:no", disabled: busy(), onclick: function () { answerHints(false); }, text: "다시 묻지 않기" }),
+    el("button", { type: "button", class: "btn sm ghost", "data-k": "hint:later", onclick: function () { S.hints = null; renderHints(); }, text: "나중에" })
+  ]));
+}
+
 /* ---------- 작업 ---------- */
 function startJob(kind) {
   if (busy()) return;
@@ -1070,7 +1109,7 @@ export function renderApp(o: AppOptions): string {
     <div class="tb-info" id="tb-info" aria-live="polite"></div>
     <button type="button" class="btn" id="print-btn">인쇄·PDF</button>
   </div>
-  <div class="bulk" id="bulk" hidden></div>
+${live ? `  <div class="hintbar" id="hintbar" role="status" hidden></div>\n` : ""}  <div class="bulk" id="bulk" hidden></div>
   <div class="list" id="list"></div>
   <p class="hint"><kbd>/</kbd> 찾기 · <kbd>j</kbd> <kbd>k</kbd> 이동 · <kbd>Enter</kbd> 열기 · <kbd>Esc</kbd> 닫기</p>
 </main>

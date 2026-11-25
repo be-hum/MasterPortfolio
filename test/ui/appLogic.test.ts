@@ -109,7 +109,7 @@ describe("setup & settings logic (11.6)", () => {
     expect(L.wizardErrors(3, { ...w, output: "/o", planScale: 3 })).toEqual(["요금제를 고르세요"]);
     w.folders.push(F("/b"));
     expect(L.wizardErrors(2, w)).toEqual([]);
-    expect(L.setupPayload({ ...w, output: " /o " })).toEqual({ university: "연세대", keywords: ["연세대"], folders: ["/b"], planScale: 5, output: "/o" });
+    expect(L.setupPayload({ ...w, output: " /o " })).toEqual({ university: "연세대", keywords: ["연세대"], folders: ["/b"], planScale: 5, output: "/o", dismissed: [] });
   });
 
   it("pctToShare clamps to 5–100% and settingsDiff sends only changed fields", () => {

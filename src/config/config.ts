@@ -20,6 +20,7 @@ export function defaultConfig(p: { university: Config["university"]; scanFolders
     models: { ...DEFAULT_MODELS },
     budget: { fiveHourShare: DEFAULT_FIVE_HOUR_SHARE, planScale: 1 },
     scope: { decisions: {} },
+    dismissedFolders: [],
   };
 }
 

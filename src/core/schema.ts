@@ -173,6 +173,8 @@ export const Config = z.object({
   }).default({ fiveHourShare: DEFAULT_FIVE_HOUR_SHARE, planScale: 1 }),
   /** 폴더 범위 판단(5.5). 기존 config.json에 없으면 빈 목록 */
   scope: z.object({ decisions: z.record(ScopeDecision).default({}) }).default({ decisions: {} }),
+  /** 화면에서 "다시 묻지 않기"를 고른 폴더 제안(예: 새로 찾은 WSL 폴더). 기존 config.json에 없으면 빈 목록 */
+  dismissedFolders: z.array(z.string()).default([]),
 });
 export type Config = z.infer<typeof Config>;
 

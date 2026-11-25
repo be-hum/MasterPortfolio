@@ -34,7 +34,7 @@ describe("setup mode (11.6)", () => {
   it("blocks data/job/settings routes with 409 and reports setup:true", async () => {
     const { call } = await boot(null);
     expect((await call("GET", "/api/state")).json).toEqual({ ok: true, setup: true });
-    for (const [m, p] of [["GET", "/api/job"], ["POST", "/api/job"], ["POST", "/api/job/stop"], ["POST", "/api/decide"], ["GET", "/api/settings"], ["POST", "/api/settings"], ["POST", "/api/settings/scope-reset"], ["GET", "/files/x.md"]] as const) {
+    for (const [m, p] of [["GET", "/api/job"], ["POST", "/api/job"], ["POST", "/api/job/stop"], ["GET", "/api/folder-hints"], ["POST", "/api/folder-hints"], ["POST", "/api/decide"], ["GET", "/api/settings"], ["POST", "/api/settings"], ["POST", "/api/settings/scope-reset"], ["GET", "/files/x.md"]] as const) {
       const r = await call(m, p, m === "POST" ? {} : undefined);
       expect([p, r.status, r.json?.error]).toEqual([p, 409, "처음 설정이 필요합니다."]);
     }
@@ -102,6 +102,14 @@ describe("setup mode (11.6)", () => {
     throwIt = true;
     const r = await call("POST", "/api/pick-folder", {});
     expect(r.status).toBe(400); expect(r.json.error).toContain("직접 입력");
+  });
+
+  it("setup stores unchecked WSL suggestions as dismissed", async () => {
+    const scan = await tmp(), out = join(await tmp(), "o");
+    const w = "\\\\wsl.localhost\\U\\home\\a\\projects";
+    const { call } = await boot(null);
+    expect((await call("POST", "/api/setup", { university: "", keywords: [], folders: [scan], planScale: 1, output: out, dismissed: [w, 3] })).status).toBe(200);
+    expect((await loadConfig(out)).dismissedFolders).toEqual([w]);
   });
 
   it("check returns the injected result (null out in setup mode)", async () => {
@@ -187,6 +195,28 @@ describe("settings API (11.6)", () => {
     expect((await post("/api/job", { kind: "scan" })).status).toBe(200);
     expect((await post("/api/settings", { planScale: 5 })).status).toBe(409);
     expect((await post("/api/settings/scope-reset", { path: scan })).status).toBe(409);
+  });
+
+  it("folder hints: new WSL folders are offered once per server; add puts them in scanFolders, dismiss never asks again", async () => {
+    const scan = await tmp(), out = await tmp();
+    const { createSetupConfig } = await import("../../src/setup/config.js");
+    process.env.MP_POINTER_FILE = join(await tmp(), "p.json");
+    await createSetupConfig({ university: "연세대", keywords: ["연세대"], folders: [scan], planScale: 1, output: out });
+    const A = "\\\\wsl.localhost\\U\\home\\a\\projects", B = "\\\\wsl.localhost\\U\\home\\a\\portfolio", C = "\\\\wsl.localhost\\U\\home\\a\\dev";
+    const c0 = await loadConfig(out); c0.scanFolders.push("\\\\wsl$\\U\\home\\a\\dev"); await saveConfig(out, c0); // 별칭으로 이미 있음
+    let calls = 0; let kw: string[] = [];
+    const srv = await startUiServer({ out, token: TOKEN, cliPath: "unused.js", html: () => "x", setupDeps: { folderHints: async (k) => { calls++; kw = k; return [A, B, C].map((path) => ({ path, label: path })); } } });
+    closers.push(srv.close);
+    const call = async (m: string, p: string, body?: unknown) => { const r = await fetch(`http://127.0.0.1:${srv.port}${p}`, { method: m, headers: { "x-mp-token": TOKEN }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: r.status, json: await r.json() }; };
+    expect((await call("GET", "/api/folder-hints")).json.folders.map((f: any) => f.path)).toEqual([A, B]);
+    expect(kw).toEqual(["연세대"]);
+    expect((await call("POST", "/api/folder-hints", { add: ["/not/offered"] })).status).toBe(400);
+    expect((await call("POST", "/api/folder-hints", { add: [A], dismiss: [B] })).json).toMatchObject({ ok: true, added: 1, dismissed: 1 });
+    const c = await loadConfig(out);
+    expect(c.scanFolders).toContain(A);
+    expect(c.dismissedFolders).toEqual([B]);
+    expect((await call("GET", "/api/folder-hints")).json.folders).toEqual([]);
+    expect(calls).toBe(1);
   });
 
   it("scope-reset removes the path and its children only", async () => {

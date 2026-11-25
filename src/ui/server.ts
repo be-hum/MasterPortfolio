@@ -11,7 +11,7 @@ import { acceptExperienceEdit, listExperiences, saveExperience, type LoadedExper
 import { decideReview, recordAnswer } from "../review/session.js";
 import { clampKeywords } from "../analyzer/keywords.js";
 import { buildUiState, loadFileTitles } from "./model.js";
-import { suggestFolders, defaultOutputDir } from "../setup/folders.js";
+import { suggestFolders, defaultOutputDir, wslSuggestions } from "../setup/folders.js";
 import { createSetupConfig, normalizeFolderInput, validateSetup, SetupError } from "../setup/config.js";
 import { pathKey } from "../core/paths.js";
 import { checkEnvironment } from "../setup/check.js";
@@ -25,6 +25,8 @@ import { PROGRESS_PREFIX, SUMMARY_PREFIX, etaSeconds, overallProgress, type Prog
 export type SetupDeps = {
   suggest?: typeof suggestFolders; pick?: typeof pickFolder; check?: typeof checkEnvironment;
   create?: typeof createSetupConfig; defaultOutput?: () => Promise<string>;
+  /** 화면을 열 때 알릴 새 폴더(기본: Windows에서 WSL 홈 안의 자료 폴더) */
+  folderHints?: (keywords: string[]) => Promise<{ path: string; label: string }[]>;
 };
 /** out이 null이면 설정 모드: 처음 설정 API만 열려 있다 */
 export type UiServerOptions = { out: string | null; port?: number; token: string; cliPath: string; html: (token: string) => string; onShutdown?: () => void; setupDeps?: SetupDeps };
@@ -159,6 +161,22 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     child.on("close", (code) => finish(code));
   }
 
+  // 새 폴더 제안: 서버를 띄운 뒤 한 번만 찾는다(WSL 접근은 느리고 배포판을 깨울 수 있음)
+  let hintCache: Promise<{ path: string; label: string }[]> | null = null;
+  const hints = (keywords: string[]) => {
+    if (!hintCache) {
+      const f = sd.folderHints ?? (process.platform === "win32" ? (kw: string[]) => wslSuggestions(kw, {}) : async () => []);
+      hintCache = f(keywords).catch(() => []);
+    }
+    return hintCache;
+  };
+  /** \\wsl$\ 와 \\wsl.localhost\ 는 같은 곳 */
+  const hintKey = (p: string) => pathKey(p.replace(/^\\\\wsl\$\\/i, "\\\\wsl.localhost\\"));
+  const newHints = (list: { path: string; label: string }[], c: { scanFolders: string[]; dismissedFolders: string[] }) => {
+    const have = new Set([...c.scanFolders, ...c.dismissedFolders].map(hintKey));
+    return list.filter((h) => !have.has(hintKey(h.path)));
+  };
+
   const SETUP_OPEN = new Set(["/api/setup", "/api/setup/suggest", "/api/pick-folder", "/api/check", "/api/shutdown"]);
   const busyErr = () => new HttpError(409, "작업 실행 중에는 수정할 수 없습니다. 끝난 뒤 다시 시도하세요.");
 
@@ -214,6 +232,10 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       const [folders, defaultOutput] = await Promise.all([(sd.suggest ?? suggestFolders)(keywords), (sd.defaultOutput ?? defaultOutputDir)()]);
       return send(res, 200, { ok: true, keywords, folders, defaultOutput });
     }
+    if (path === "/api/folder-hints" && method === "GET") {
+      const c = await loadConfig(cur());
+      return send(res, 200, { ok: true, folders: newHints(await hints(c.university.keywords), c) });
+    }
     if (path === "/api/settings" && method === "GET") {
       const dir = cur();
       const c = await loadConfig(dir);
@@ -251,6 +273,13 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       };
       try {
         const r = await (sd.create ?? createSetupConfig)(input, { adoptExisting: b.adopt === true });
+        const dismissed = Array.isArray(b.dismissed) ? b.dismissed.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+        if (dismissed.length) {
+          const c = await loadConfig(r.output);
+          const have = new Set(c.dismissedFolders.map(hintKey));
+          c.dismissedFolders.push(...dismissed.filter((p) => !have.has(hintKey(p))));
+          await saveConfig(r.output, c);
+        }
         out = r.output;
         return send(res, 200, { ok: true, output: r.output });
       } catch (e) {
@@ -276,6 +305,21 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       const removed = resetScopeDecisions(c.scope.decisions, raw);
       if (removed.length) await saveConfig(dir, c);
       send(res, 200, { ok: true, removed: removed.length });
+    });
+    // 새 폴더 제안에 답하기: add는 스캔 폴더에 넣고, dismiss는 다시 묻지 않는다. 이번에 제안한 폴더만 받는다
+    if (path === "/api/folder-hints") return serial(async () => {
+      const dir = cur();
+      if (job?.running) throw busyErr();
+      const pick = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+      const c = await loadConfig(dir);
+      const offered = new Map(newHints(await hints(c.university.keywords), c).map((h) => [hintKey(h.path), h.path]));
+      const add = pick(b.add).map((p) => offered.get(hintKey(p))).filter((p): p is string => !!p);
+      const dismiss = pick(b.dismiss).map((p) => offered.get(hintKey(p))).filter((p): p is string => !!p);
+      if (!add.length && !dismiss.length) throw new HttpError(400, "처리할 제안 폴더가 없습니다.");
+      c.scanFolders.push(...add);
+      c.dismissedFolders.push(...dismiss.filter((p) => !add.includes(p)));
+      await saveConfig(dir, c);
+      send(res, 200, { ok: true, added: add.length, dismissed: dismiss.length });
     });
     if (path === "/api/job") return serial(async () => { startJob(String(b.kind)); send(res, 200, { ok: true, job: jobState() }); });
     // 중지: 작업과 에이전트 프로세스 트리를 끝낸다. 끝날 때(close)까지는 계속 실행 중으로 보고 쓰기는 409
