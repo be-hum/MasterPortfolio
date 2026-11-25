@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { normalizeWhitespace } from "../core/text.js";
 import { errResult, type Extractor } from "./types.js";
 
@@ -8,8 +8,10 @@ type Pdfjs = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
 /** pdfjs 자원 폴더. CJK 문서의 미리 정의된 CMap(예: UniKS-UCS2-H)과 표준 글꼴이 없으면 한글이 빈 텍스트로 나온다 */
 const PDFJS_DIR = dirname(createRequire(import.meta.url).resolve("pdfjs-dist/package.json"));
-const CMAP_URL = join(PDFJS_DIR, "cmaps") + sep;
-const STANDARD_FONTS_URL = join(PDFJS_DIR, "standard_fonts") + sep;
+// pdfjs는 자원 경로가 "/"로 끝나야 받는다. Windows도 "/" 구분 경로를 읽으므로 구분자를 "/"로 통일한다
+const asDirUrl = (p: string) => p.replace(/\\/g, "/").replace(/\/?$/, "/");
+export const CMAP_URL = asDirUrl(join(PDFJS_DIR, "cmaps"));
+export const STANDARD_FONTS_URL = asDirUrl(join(PDFJS_DIR, "standard_fonts"));
 
 let pdfjs: Promise<Pdfjs> | null = null;
 /**

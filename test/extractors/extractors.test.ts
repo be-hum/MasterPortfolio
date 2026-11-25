@@ -4,6 +4,7 @@ import { join } from "node:path";
 import JSZip from "jszip";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { extractorFor } from "../../src/extractors/registry.js";
+import { CMAP_URL, STANDARD_FONTS_URL } from "../../src/extractors/pdf.js";
 import { makeDocx, makePptx } from "../helpers/ooxml.js";
 import { mkTmp } from "../helpers/tmp.js";
 
@@ -40,6 +41,10 @@ describe("extractors", () => {
     // "한글" in CP949
     await writeFile(p, Buffer.from([0xc7, 0xd1, 0xb1, 0xdb]));
     expect(await extractorFor("txt")!.extract(p)).toMatchObject({ ok: true, text: "한글" });
+  });
+
+  it("pdf resource paths use \"/\" and end with it (pdfjs rejects Windows \\ paths)", () => {
+    for (const u of [CMAP_URL, STANDARD_FONTS_URL]) { expect(u.endsWith("/")).toBe(true); expect(u).not.toContain("\\"); }
   });
 
   it("pdf: Korean text with a predefined CMap and no embedded font (HWP export)", async () => {
