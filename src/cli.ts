@@ -27,7 +27,7 @@ function parseBudget(v: string): number {
 
 export function buildProgram(): Command {
   const program = new Command();
-  program.name("mp").description("MasterPortfolio: 이력서·포트폴리오 자료 인벤토리").version("0.1.1");
+  program.name("mp").description("MasterPortfolio: 이력서·포트폴리오 자료 인벤토리").version("0.2.0");
   program.exitOverride();
   program.command("init").description("대학명·스캔 폴더·에이전트 설정")
     .option("--non-interactive").option("--university <name>").option("--folders <paths...>").option("--agent <name>").option("--output <dir>")
