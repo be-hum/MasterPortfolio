@@ -109,7 +109,9 @@ button:disabled{cursor:not-allowed;opacity:.5}
 /* 일괄 결정 */
 .hintbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 8px;padding:10px 12px;background:var(--warn-bg);color:var(--warn-ink);border-radius:10px;font-size:13px}
 .hintbar p{margin:0;flex:1 1 280px}
-.hintbar .hb-list{display:block;margin-top:2px;font:12px/1.5 ui-monospace,"D2Coding",Consolas,monospace;overflow-wrap:anywhere}
+.hintbar .hb-main{flex:1 1 320px;min-width:0}
+.hintbar .hb-items{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
+.hintbar .ck-s{display:block;font:11.5px/1.45 ui-monospace,"D2Coding",Consolas,monospace;overflow-wrap:anywhere;opacity:.8}
 .hintbar .hb-btns{display:flex;flex-wrap:wrap;gap:6px}
 .bulk{position:sticky;top:62px;z-index:9;display:flex;align-items:center;gap:10px;margin:0 0 6px;padding:8px 12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 1px 2px rgba(16,24,40,.05)}
 .bulk[hidden]{display:none}
@@ -287,20 +289,20 @@ var FIELD_LABEL = { role: "역할", period: "기간", contribution: "수행 방�
 var STAGE_LABEL = { walk: "파일 찾기", hash: "파일 확인", scope: "폴더 범위", "judge-pending": "이전 카드 판정", triage: "선별", extract: "카드 추출", judge: "판정", group: "경험 묶기", review: "반영", keywords: "키워드" };
 function progressText(p) {
   var num = function (n) { return Number(n).toLocaleString("ko-KR"); };
-  var parts = [(STAGE_LABEL[p.stage] || p.stage) + " " + (p.total ? num(p.done) + "/" + num(p.total) : num(p.done) + "개")];
+  var parts = [(STAGE_LABEL[p.stage] || p.stage) + (p.total || p.done ? " " + (p.total ? num(p.done) + "/" + num(p.total) : num(p.done) + "개") : "")];
   if (p.overall !== null && p.overall !== undefined) parts.push("전체 " + Math.round(p.overall * 100) + "%");
   if (p.etaSec !== null && p.etaSec !== undefined) parts.push(p.etaSec < 60 ? "1분 안에 끝남" : "약 " + Math.round(p.etaSec / 60) + "분 남음");
   else if (p.overall !== null && p.overall !== undefined && p.overall < 1) parts.push("남은 시간 계산 중");
   return parts.join(" · ");
 }
-var JOB_LABEL = { scan: "새 자료 스캔", group: "경험 묶기", apply: "반영 실행", keywords: "키워드 만들기", master: "master 다시 만들기" };
+var JOB_LABEL = { all: "한 번에 정리", scan: "새 자료 스캔", group: "경험 묶기", apply: "반영 실행", keywords: "키워드 만들기", master: "master 다시 만들기" };
 var TODO = [["decide", "결정 대기"], ["answer", "답변 대기"], ["apply", "반영 대기"]];
 var STATUS_ORDER = ["pending", "adopted", "held", "excluded"];
 var DEFAULT_STATUSES = LIVE ? ["pending", "adopted"] : null;
 var DECISIONS = [["adopted", "채택"], ["held", "보류"], ["excluded", "제외"]];
 
 var S = {
-  exps: [], output: "", generatedAt: "", job: null, loading: LIVE, error: null, hints: null, hintsAsked: false,
+  exps: [], output: "", generatedAt: "", job: null, loading: LIVE, error: null, hints: null, hintsAsked: false, lastScan: null, staleClosed: false,
   view: "category", statuses: DEFAULT_STATUSES ? DEFAULT_STATUSES.slice() : null, contribs: [], q: "", todo: null,
   sel: null, open: null, order: [], activeG: null, checked: {}, skipped: {}, drafts: {},
   editing: false, form: null, form0: null, fileView: null, showLog: false, polling: false, menu: false
@@ -365,7 +367,7 @@ function load() {
     if (!r.ok) S.error = errMsg(r);
     else if (r.json.setup) { enterSetup(); return; }
     else {
-      S.error = null; S.exps = r.json.experiences || []; S.output = r.json.output || ""; S.job = r.json.job || null;
+      S.error = null; S.exps = r.json.experiences || []; S.output = r.json.output || ""; S.job = r.json.job || null; S.lastScan = r.json.lastScan || null;
       if (busy()) ensurePoll();
       if (!S.hintsAsked) { S.hintsAsked = true; fetchHints(); }
     }
@@ -893,40 +895,86 @@ function shutdown() {
 /* ---------- 새 폴더 제안(WSL 등): 화면을 열 때 한 번 ---------- */
 function fetchHints() {
   api("GET", "/api/folder-hints").then(function (r) {
-    if (r.ok && r.json.folders && r.json.folders.length) { S.hints = r.json.folders; renderHints(); }
+    if (r.ok && r.json.folders && r.json.folders.length) {
+      // WSL 폴더는 자료가 있을 가능성이 높아 미리 체크, 드라이브·클라우드는 사용자가 고른다
+      S.hints = r.json.folders.map(function (h) { return { path: h.path, label: h.label, kind: h.kind, checked: h.kind === "wsl" }; });
+      renderHints();
+    }
   }, function () { /* 제안은 없어도 된다 */ });
 }
+/** add: 체크한 폴더는 추가, 나머지는 다시 묻지 않음. add=false: 모두 다시 묻지 않음 */
 function answerHints(add) {
-  var paths = (S.hints || []).map(function (h) { return h.path; });
-  api("POST", "/api/folder-hints", add ? { add: paths } : { dismiss: paths }).then(function (r) {
+  var list = S.hints || [];
+  var on = add ? list.filter(function (h) { return h.checked; }) : [];
+  var off = list.filter(function (h) { return on.indexOf(h) < 0; });
+  if (add && !on.length) { toast("추가할 폴더를 체크하세요", "err"); return; }
+  api("POST", "/api/folder-hints", { add: on.map(function (h) { return h.path; }), dismiss: off.map(function (h) { return h.path; }) }).then(function (r) {
     if (!r.ok) { toast(errMsg(r), "err"); return; }
     S.hints = null; renderHints();
     toast(add ? "스캔 폴더에 " + r.json.added + "개를 추가했습니다 · [새 자료 스캔]을 누르면 탐색합니다" : "이 폴더들은 다시 묻지 않습니다(⚙ 설정의 [제안 보기]에서 추가할 수 있음)");
     if (S.settings) fetchSettings(false, false);
   }, netErr);
 }
+/** 마지막 스캔이 이 일수보다 오래됐으면 새 자료 스캔을 권한다 */
+var STALE_DAYS = 7;
+function staleDays() {
+  if (S.staleClosed || busy() || S.loading || S.error) return null;
+  if (!S.lastScan) return S.exps.length ? null : -1; // 한 번도 스캔하지 않음
+  var d = Math.floor((Date.now() - Date.parse(S.lastScan)) / 86400000);
+  return d >= STALE_DAYS ? d : null;
+}
 function renderHints() {
   var H = $("hintbar");
   if (!H) return;
   var list = S.hints || [];
-  H.hidden = !list.length;
+  var stale = staleDays();
+  H.hidden = !list.length && stale === null;
   clear(H);
+  if (stale !== null) {
+    H.appendChild(el("p", {}, [el("strong", { text: stale < 0 ? "아직 스캔한 적이 없습니다." : "마지막 스캔이 " + stale + "일 전입니다." }), " 그사이 새로 생긴 과제·발표 자료가 있을 수 있습니다."]));
+    H.appendChild(el("div", { class: "hb-btns" }, [
+      el("button", { type: "button", class: "btn sm primary", "data-k": "stale:all", onclick: function () { startJob("all"); }, text: "한 번에 정리" }),
+      el("button", { type: "button", class: "btn sm", "data-k": "stale:scan", onclick: function () { startJob("scan"); }, text: "새 자료 스캔만" }),
+      el("button", { type: "button", class: "btn sm ghost", "data-k": "stale:close", onclick: function () { S.staleClosed = true; renderHints(); }, text: "닫기" })
+    ]));
+  }
   if (!list.length) return;
-  H.appendChild(el("p", {}, [
-    el("strong", { text: "WSL(리눅스)에서 자료가 있을 만한 새 폴더 " + list.length + "개를 찾았습니다." }),
-    " 스캔 대상에 넣을까요?",
-    el("span", { class: "hb-list", text: list.map(function (h) { return h.label; }).join(" · ") })
+  H.appendChild(el("div", { class: "hb-main" }, [
+    el("p", {}, [el("strong", { text: "자료가 있을 만한 새 폴더 " + list.length + "개를 찾았습니다." }), " 스캔 대상에 넣을 폴더를 체크하세요."]),
+    el("ul", { class: "hb-items" }, list.map(function (h) {
+      return el("li", {}, [el("label", { class: "ck" }, [
+        el("input", { type: "checkbox", "data-k": "hint:f:" + h.path, checked: !!h.checked, onchange: function (ev) { h.checked = ev.target.checked; } }),
+        el("span", { class: "ck-t" }, [el("span", { class: "ck-l", text: h.label }), h.label !== h.path ? el("span", { class: "ck-s", text: h.path }) : null])
+      ])]);
+    }))
   ]));
   H.appendChild(el("div", { class: "hb-btns" }, [
-    el("button", { type: "button", class: "btn sm primary", "data-k": "hint:add", disabled: busy(), title: busy() ? "작업이 끝난 뒤 추가할 수 있습니다" : null, onclick: function () { answerHints(true); }, text: "스캔 대상에 추가" }),
+    el("button", { type: "button", class: "btn sm primary", "data-k": "hint:add", disabled: busy(), title: busy() ? "작업이 끝난 뒤 추가할 수 있습니다" : "체크한 폴더는 추가하고, 체크하지 않은 폴더는 다시 묻지 않습니다", onclick: function () { answerHints(true); }, text: "체크한 폴더 추가" }),
     el("button", { type: "button", class: "btn sm", "data-k": "hint:no", disabled: busy(), onclick: function () { answerHints(false); }, text: "다시 묻지 않기" }),
     el("button", { type: "button", class: "btn sm ghost", "data-k": "hint:later", onclick: function () { S.hints = null; renderHints(); }, text: "나중에" })
   ]));
 }
 
 /* ---------- 작업 ---------- */
+var BASE_TITLE = document.title;
+/** 작업이 끝났을 때 다른 창에서 일하고 있어도 알 수 있게: 탭 제목·운영체제 알림 */
+function askNotify() {
+  try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (e) { /* 지원 안 함 */ }
+}
+function notifyDone(text, ok) {
+  document.title = (ok ? "✓ " : "! ") + text + " · " + BASE_TITLE;
+  try { if (document.hidden && window.Notification && Notification.permission === "granted") new Notification("MasterPortfolio", { body: text }); } catch (e) { /* 지원 안 함 */ }
+}
+function jobTitle() {
+  var j = S.job;
+  if (!j || !j.running) return;
+  var p = j.progress, pct = p && p.overall !== null && p.overall !== undefined ? Math.round(p.overall * 100) + "% " : "";
+  document.title = "(" + pct + (JOB_LABEL[j.kind] || j.kind) + " 중) " + BASE_TITLE;
+}
+document.addEventListener("visibilitychange", function () { if (!document.hidden && !busy() && document.title !== BASE_TITLE) document.title = BASE_TITLE; });
 function startJob(kind) {
   if (busy()) return;
+  askNotify();
   api("POST", "/api/job", { kind: kind }).then(function (r) {
     if (!r.ok) { toast(errMsg(r), "err"); return; }
     S.job = r.json.job; S.showLog = false;
@@ -945,11 +993,12 @@ function ensurePoll() { if (S.polling) return; S.polling = true; setTimeout(tick
 function tick() {
   api("GET", "/api/job").then(function (r) {
     if (r.ok) S.job = r.json.job;
-    if (S.job && S.job.running) { renderJob(); setTimeout(tick, 1000); return; }
+    if (S.job && S.job.running) { renderJob(); jobTitle(); setTimeout(tick, 1000); return; }
     S.polling = false;
-    if (S.job && S.job.stopped) toast(JOB_LABEL[S.job.kind] + " 중지 — " + S.job.summary);
+    if (S.job && S.job.stopped) { toast(JOB_LABEL[S.job.kind] + " 중지 — " + S.job.summary); notifyDone(JOB_LABEL[S.job.kind] + " 중지", true); }
     else if (S.job) {
       var okd = S.job.code === 0;
+      notifyDone(JOB_LABEL[S.job.kind] + (okd ? " 완료" : " 실패") + (S.job.summary ? " — " + S.job.summary : ""), okd);
       toast(JOB_LABEL[S.job.kind] + (okd ? " 완료" + (S.job.summary ? " — " + S.job.summary : "") : " 실패(코드 " + S.job.code + ") — " + (S.job.summary || "로그를 확인하세요")), okd ? null : "err");
       if (!okd) S.showLog = true;
     }
@@ -967,7 +1016,7 @@ function renderJob() {
   var left = el("div", { class: "jb-left" });
   if (run) {
     left.appendChild(el("span", { class: "spin", "aria-hidden": "true" }));
-    left.appendChild(el("strong", { text: (JOB_LABEL[j.kind] || j.kind) + " 실행 중" }));
+    left.appendChild(el("strong", { text: (JOB_LABEL[j.kind] || j.kind) + (j.step ? " " + (j.step.index + 1) + "/" + j.step.count + " · " + (JOB_LABEL[j.step.kind] || j.step.kind) : "") + " 실행 중" }));
     var pr = j.progress;
     if (pr) {
       var pct = pr.overall !== null && pr.overall !== undefined ? pr.overall : (pr.total ? pr.done / pr.total : 0);
@@ -991,10 +1040,12 @@ function renderJob() {
   if (j && j.lines.length) left.appendChild(el("button", { type: "button", class: "linklike", "data-k": "log", "aria-expanded": String(S.showLog),
     onclick: function () { S.showLog = !S.showLog; renderJob(); }, text: S.showLog ? "로그 닫기" : "로그 보기" }));
   var right = el("div", { class: "jb-right" }, [
+    el("button", { type: "button", class: "btn primary", "data-k": "job:all", disabled: run, title: "새 자료 스캔 → 경험 묶기 → 반영 → 키워드 → master를 차례로 실행(에이전트 사용). 돌려 두고 다른 일을 하다 끝나면 알림을 받습니다", onclick: function () { startJob("all"); }, text: "한 번에 정리" }),
+    el("span", { class: "jb-sep", "aria-hidden": "true" }),
     el("button", { type: "button", class: "btn", "data-k": "job:scan", disabled: run, title: "설정한 폴더에서 새로 생긴 자료를 찾아 카드로 만들기(바뀐 파일은 알려 주기만 함, 에이전트 사용)", onclick: function () { startJob("scan"); }, text: "새 자료 스캔" }),
     el("button", { type: "button", class: "btn", "data-k": "job:group", disabled: run, title: "아직 경험에 묶이지 않은 카드를 경험으로 묶기(에이전트 사용)", onclick: function () { startJob("group"); }, text: "경험 묶기" }),
     el("span", { class: "jb-sep", "aria-hidden": "true" }),
-    el("button", { type: "button", class: "btn primary", "data-k": "job:apply", disabled: run || !pend, title: !pend ? "반영할 답이 없습니다" : "답변을 카드 필드·STAR에 반영(에이전트 사용)", onclick: function () { startJob("apply"); }, text: "반영 실행" }),
+    el("button", { type: "button", class: "btn", "data-k": "job:apply", disabled: run || !pend, title: !pend ? "반영할 답이 없습니다" : "답변을 카드 필드·STAR에 반영(에이전트 사용)", onclick: function () { startJob("apply"); }, text: "반영 실행" }),
     el("button", { type: "button", class: "btn", "data-k": "job:keywords", disabled: run, title: "키워드가 빈 경험에 키워드 만들기(에이전트 사용)", onclick: function () { startJob("keywords"); }, text: "키워드 만들기" }),
     el("button", { type: "button", class: "btn", "data-k": "job:master", disabled: run, title: "master.md·master.html 다시 쓰기", onclick: function () { startJob("master"); }, text: "master 다시 만들기" }),
     el("span", { class: "jb-sep", "aria-hidden": "true" }),

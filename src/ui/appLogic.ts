@@ -133,6 +133,8 @@ var FOLDER_GROUPS = [
   ["wsl", "WSL(리눅스) 폴더", ["wsl"]],
   ["keyword", "이름이 맞는 폴더", ["keyword"]]
 ];
+/** 메인 화면에서 "새 폴더"로 알리는 제안 종류 */
+var HINT_KINDS = ["cloud", "drive", "wsl"];
 /** 경로 비교 키: 끝 구분자 제거, Windows 경로(드라이브 문자·역슬래시)는 대소문자 무시 */
 function folderKey(p) {
   var s = String(p || "").trim().replace(/[\\/]+$/, "").replace(/^\\\\wsl\$\\/i, "\\\\wsl.localhost\\");
@@ -188,7 +190,8 @@ function setupPayload(w) {
     folders: w.folders.filter(function (f) { return f.checked; }).map(function (f) { return f.path; }),
     planScale: w.planScale, output: String(w.output || "").trim(),
     // 체크를 끈 WSL 제안은 메인 화면에서 다시 묻지 않는다
-    dismissed: w.folders.filter(function (f) { return f.kind === "wsl" && !f.checked; }).map(function (f) { return f.path; })
+    // 체크를 끈 클라우드·드라이브·WSL 제안은 메인 화면에서 다시 묻지 않는다
+    dismissed: w.folders.filter(function (f) { return HINT_KINDS.indexOf(f.kind) >= 0 && !f.checked; }).map(function (f) { return f.path; })
   };
 }
 /** 예산 비율 % 입력 → 0.05~1 (숫자가 아니면 null) */

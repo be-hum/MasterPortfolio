@@ -11,7 +11,7 @@ import { acceptExperienceEdit, listExperiences, saveExperience, type LoadedExper
 import { decideReview, recordAnswer } from "../review/session.js";
 import { clampKeywords } from "../analyzer/keywords.js";
 import { buildUiState, loadFileTitles } from "./model.js";
-import { suggestFolders, defaultOutputDir, wslSuggestions } from "../setup/folders.js";
+import { suggestFolders, defaultOutputDir } from "../setup/folders.js";
 import { createSetupConfig, normalizeFolderInput, validateSetup, SetupError } from "../setup/config.js";
 import { pathKey } from "../core/paths.js";
 import { checkEnvironment } from "../setup/check.js";
@@ -20,14 +20,21 @@ import { expandUniversity } from "../discovery/universities.js";
 import { resetScopeDecisions } from "../discovery/scopeDecisions.js";
 import { loadConfig, saveConfig } from "../config/config.js";
 import { killTree, spawnGroupOptions } from "./killTree.js";
-import { PROGRESS_PREFIX, SUMMARY_PREFIX, etaSeconds, overallProgress, type ProgressEvent } from "../core/progress.js";
+import { CHAIN, PROGRESS_PREFIX, SUMMARY_PREFIX, chainProgress, etaSeconds, overallProgress, type ProgressEvent } from "../core/progress.js";
 
 export type SetupDeps = {
   suggest?: typeof suggestFolders; pick?: typeof pickFolder; check?: typeof checkEnvironment;
   create?: typeof createSetupConfig; defaultOutput?: () => Promise<string>;
   /** 화면을 열 때 알릴 새 폴더(기본: Windows에서 WSL 홈 안의 자료 폴더) */
-  folderHints?: (keywords: string[]) => Promise<{ path: string; label: string }[]>;
+  folderHints?: (keywords: string[]) => Promise<FolderHint[]>;
 };
+export type FolderHint = { path: string; label: string; kind?: string };
+/** 화면을 열 때 알릴 폴더: 클라우드(OneDrive 등)·다른 드라이브·WSL. 이름 검색(느림)은 하지 않는다 */
+async function defaultFolderHints(keywords: string[]): Promise<FolderHint[]> {
+  if (process.platform !== "win32" && process.platform !== "darwin") return [];
+  const all = await suggestFolders(keywords, { candidates: async () => [] });
+  return all.filter((f) => f.kind === "cloud" || f.kind === "drive" || f.kind === "wsl").map(({ path, label, kind }) => ({ path, label, kind }));
+}
 /** out이 null이면 설정 모드: 처음 설정 API만 열려 있다 */
 export type UiServerOptions = { out: string | null; port?: number; token: string; cliPath: string; html: (token: string) => string; onShutdown?: () => void; setupDeps?: SetupDeps };
 export type JobProgress = { stage: string; done: number; total: number; overall: number | null; etaSec: number | null };
@@ -35,11 +42,14 @@ export type JobState = { kind: string; running: boolean; code: number | null; li
   /** 완료 요약: 작업이 보낸 @@summary, 없으면 마지막 표준 출력 줄 */
   summary: string | null;
   /** 사용자가 [중지]를 눌렀음(끝날 때까지 running은 true) */
-  stopped: boolean };
+  stopped: boolean;
+  /** [한 번에 정리]: 지금 몇 번째 작업인지 */
+  step: { index: number; count: number; kind: string } | null };
 
 const MAX_BODY = 1024 * 1024;
 const MAX_DRAIN = 64 * 1024 * 1024;
 const MAX_LINES = 200;
+const STEP_LABEL: Record<string, string> = { scan: "스캔", group: "묶기", apply: "반영", keywords: "키워드", master: "master" };
 const JOBS: Record<string, string[]> = {
   scan: ["scan", "--yes"],
   group: ["group", "--yes"],
@@ -96,20 +106,23 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
   const needSetup = () => new HttpError(409, "처음 설정이 필요합니다.");
   const cur = (): string => { if (out === null) throw needSetup(); return out; };
   let port = 0;
-  let job: { kind: string; running: boolean; code: number | null; lines: string[]; child: ChildProcess | null; progress: ProgressEvent | null; startedAt: number; maxOverall: number; summary: string | null; lastOut: string | null; stopped: boolean } | null = null;
+  let job: { kind: string; running: boolean; code: number | null; lines: string[]; child: ChildProcess | null; progress: ProgressEvent | null; startedAt: number; maxOverall: number; summary: string | null; lastOut: string | null; stopped: boolean; step: number; stepKinds: string[]; stepSummaries: string[] } | null = null;
   let chain: Promise<unknown> = Promise.resolve();
   const serial = <T>(fn: () => Promise<T>): Promise<T> => { const r = chain.then(fn, fn); chain = r.catch(() => {}); return r; };
   const jobState = (): JobState | null => {
     if (!job) return null;
     const p = job.progress;
-    const raw = p ? overallProgress(job.kind, p) : null;
+    const chain = job.stepKinds.length > 1;
+    const raw = chain ? chainProgress(job.step, p) : p ? overallProgress(job.kind, p) : null;
     // 범위 정리 뒤 파일을 다시 찾는 등 앞 단계로 돌아가도 전체 %는 뒤로 가지 않는다
     if (raw !== null) job.maxOverall = Math.max(job.maxOverall, raw);
     const overall = raw === null ? null : job.maxOverall;
     return {
       kind: job.kind, running: job.running, code: job.code, lines: [...job.lines], stopped: job.stopped,
-      summary: job.running ? null : job.stopped ? "사용자가 중지함 — 이미 만든 카드는 저장되어 있고, 다음 실행에서 이어서 처리합니다" : (job.summary ?? job.lastOut),
-      progress: p ? { ...p, overall, etaSec: job.running ? etaSeconds(overall, Date.now() - job.startedAt) : null } : null,
+      summary: job.running ? null : job.stopped ? "사용자가 중지함 — 이미 만든 카드는 저장되어 있고, 다음 실행에서 이어서 처리합니다"
+        : chain ? job.stepSummaries.join(" / ") || null : (job.summary ?? job.lastOut),
+      progress: p || chain ? { ...(p ?? { stage: job.stepKinds[job.step] ?? job.kind, done: 0, total: 0 }), overall, etaSec: job.running ? etaSeconds(overall, Date.now() - job.startedAt) : null } : null,
+      step: chain ? { index: job.step, count: job.stepKinds.length, kind: job.stepKinds[Math.min(job.step, job.stepKinds.length - 1)] } : null,
     };
   };
 
@@ -132,9 +145,10 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
   function startJob(kind: string) {
     const outDir = cur();
     if (job?.running) throw new HttpError(409, "이미 작업이 실행 중입니다.");
-    const args = JOBS[kind];
-    if (!args) throw new HttpError(400, "알 수 없는 작업입니다.");
-    const j = { kind, running: true, code: null as number | null, lines: [] as string[], child: null as ChildProcess | null, progress: null as ProgressEvent | null, startedAt: Date.now(), maxOverall: 0, summary: null as string | null, lastOut: null as string | null, stopped: false };
+    const stepKinds = kind === "all" ? CHAIN.map(([k]) => k) : [kind];
+    if (!stepKinds.every((k) => JOBS[k])) throw new HttpError(400, "알 수 없는 작업입니다.");
+    const j = { kind, running: true, code: null as number | null, lines: [] as string[], child: null as ChildProcess | null, progress: null as ProgressEvent | null, startedAt: Date.now(), maxOverall: 0, summary: null as string | null, lastOut: null as string | null, stopped: false,
+      step: 0, stepKinds, stepSummaries: [] as string[] };
     job = j;
     const push = (l: string, fromStdout = false) => {
       if (l.startsWith(SUMMARY_PREFIX)) { j.summary = l.slice(SUMMARY_PREFIX.length).trim() || null; return; }
@@ -146,33 +160,50 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       if (fromStdout && l.trim()) j.lastOut = l.trim();
       j.lines.push(l); if (j.lines.length > MAX_LINES) j.lines.splice(0, j.lines.length - MAX_LINES);
     };
-    const child = spawn(process.execPath, [o.cliPath, ...args], { cwd: process.cwd(), env: { ...process.env, MP_OUTPUT_DIR: outDir, MP_PROGRESS: "1" }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, ...spawnGroupOptions() });
-    j.child = child;
-    for (const s of [child.stdout!, child.stderr!]) {
-      let buf = "";
-      const isOut = s === child.stdout;
-      s.setEncoding("utf8");
-      s.on("data", (d: string) => { buf += d; const parts = buf.split(/\r?\n/); buf = parts.pop()!; for (const l of parts) push(l, isOut); });
-      s.on("end", () => { if (buf) push(buf, isOut); buf = ""; });
-    }
-    let done = false;
-    const finish = (code: number | null) => { if (done) return; done = true; j.running = false; j.code = code ?? 1; j.child = null; };
-    child.on("error", (e) => { push(`실행 실패: ${e.message}`); finish(1); });
-    child.on("close", (code) => finish(code));
+    const finish = (code: number | null) => { j.running = false; j.code = code ?? 1; j.child = null; };
+    // 연쇄 작업은 앞 작업이 성공해야 다음으로 간다(실패·예산 중단·[중지]면 거기서 멈춤)
+    const runStep = () => {
+      const k = j.stepKinds[j.step];
+      if (j.stepKinds.length > 1) push(`── ${j.step + 1}/${j.stepKinds.length} ${STEP_LABEL[k] ?? k} ──`);
+      j.summary = null; j.lastOut = null; j.progress = null;
+      const child = spawn(process.execPath, [o.cliPath, ...JOBS[k]], { cwd: process.cwd(), env: { ...process.env, MP_OUTPUT_DIR: outDir, MP_PROGRESS: "1" }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, ...spawnGroupOptions() });
+      j.child = child;
+      for (const st of [child.stdout!, child.stderr!]) {
+        let buf = "";
+        const isOut = st === child.stdout;
+        st.setEncoding("utf8");
+        st.on("data", (d: string) => { buf += d; const parts = buf.split(/\r?\n/); buf = parts.pop()!; for (const l of parts) push(l, isOut); });
+        st.on("end", () => { if (buf) push(buf, isOut); buf = ""; });
+      }
+      let done = false;
+      const end = (code: number | null) => {
+        if (done) return; done = true;
+        if (j.stepKinds.length > 1) {
+          const sum = j.summary ?? j.lastOut;
+          j.stepSummaries.push(`${STEP_LABEL[k] ?? k}: ${code === 0 ? sum ?? "완료" : `실패(코드 ${code ?? 1})${sum ? " " + sum : ""}`}`);
+        }
+        if (code === 0 && !j.stopped && j.step + 1 < j.stepKinds.length) { j.step++; runStep(); return; }
+        if (code === 0) j.step = j.stepKinds.length;
+        finish(code);
+      };
+      child.on("error", (e) => { push(`실행 실패: ${e.message}`); end(1); });
+      child.on("close", (code) => end(code));
+    };
+    runStep();
   }
 
   // 새 폴더 제안: 서버를 띄운 뒤 한 번만 찾는다(WSL 접근은 느리고 배포판을 깨울 수 있음)
-  let hintCache: Promise<{ path: string; label: string }[]> | null = null;
+  let hintCache: Promise<FolderHint[]> | null = null;
   const hints = (keywords: string[]) => {
     if (!hintCache) {
-      const f = sd.folderHints ?? (process.platform === "win32" ? (kw: string[]) => wslSuggestions(kw, {}) : async () => []);
+      const f = sd.folderHints ?? defaultFolderHints;
       hintCache = f(keywords).catch(() => []);
     }
     return hintCache;
   };
   /** \\wsl$\ 와 \\wsl.localhost\ 는 같은 곳 */
   const hintKey = (p: string) => pathKey(p.replace(/^\\\\wsl\$\\/i, "\\\\wsl.localhost\\"));
-  const newHints = (list: { path: string; label: string }[], c: { scanFolders: string[]; dismissedFolders: string[] }) => {
+  const newHints = (list: FolderHint[], c: { scanFolders: string[]; dismissedFolders: string[] }) => {
     const have = new Set([...c.scanFolders, ...c.dismissedFolders].map(hintKey));
     return list.filter((h) => !have.has(hintKey(h.path)));
   };
@@ -222,8 +253,8 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     }
     if (path === "/api/state" && method === "GET") {
       const dir = cur();
-      const { exps } = await fresh();
-      return send(res, 200, { ok: true, experiences: buildUiState(exps, await loadFileTitles(dir, exps)), job: jobState(), output: dir });
+      const { state, exps } = await fresh();
+      return send(res, 200, { ok: true, experiences: buildUiState(exps, await loadFileTitles(dir, exps)), job: jobState(), output: dir, lastScan: state.last_scan });
     }
     if (path === "/api/job" && method === "GET") return send(res, 200, { ok: true, job: jobState() });
     if (path === "/api/setup/suggest" && method === "GET") {

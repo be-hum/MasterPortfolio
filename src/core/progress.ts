@@ -56,6 +56,18 @@ export const JOB_PLANS: Record<string, [string, number][]> = {
   keywords: [["keywords", 1]],
 };
 
+/** [한 번에 정리]: 차례로 실행하는 작업과 전체 진행률 비중 */
+export const CHAIN: [string, number][] = [["scan", 0.55], ["group", 0.2], ["apply", 0.1], ["keywords", 0.1], ["master", 0.05]];
+
+/** 연쇄 작업의 전체 진행률: 앞 작업은 끝난 것으로, 지금 작업은 그 작업의 진행률만큼 */
+export function chainProgress(step: number, ev: ProgressEvent | null): number {
+  const before = CHAIN.slice(0, step).reduce((n, [, w]) => n + w, 0);
+  const cur = CHAIN[step];
+  if (!cur) return 1;
+  const inner = ev ? overallProgress(cur[0], ev) ?? 0 : 0;
+  return before + cur[1] * inner;
+}
+
 /** 전체 진행률 0~1. 계획에 없는 단계면 null. 계획에서 앞선 단계는 끝난 것으로 본다(건너뛴 단계 포함) */
 export function overallProgress(kind: string, ev: ProgressEvent): number | null {
   const plan = JOB_PLANS[kind];

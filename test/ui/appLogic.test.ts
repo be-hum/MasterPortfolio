@@ -110,6 +110,9 @@ describe("setup & settings logic (11.6)", () => {
     w.folders.push(F("/b"));
     expect(L.wizardErrors(2, w)).toEqual([]);
     expect(L.setupPayload({ ...w, output: " /o " })).toEqual({ university: "연세대", keywords: ["연세대"], folders: ["/b"], planScale: 5, output: "/o", dismissed: [] });
+    // 체크를 끈 클라우드·드라이브·WSL 제안만 "다시 묻지 않음"으로(기본 폴더·이름 검색 결과는 아님)
+    const w2 = { ...w, output: "/o", folders: [F("/d", "drive", false), F("/c", "cloud", false), F("/w", "wsl", true), F("/k", "keyword", false), F("/x", "documents", false)] };
+    expect(L.setupPayload(w2).dismissed).toEqual(["/d", "/c"]);
   });
 
   it("pctToShare clamps to 5–100% and settingsDiff sends only changed fields", () => {

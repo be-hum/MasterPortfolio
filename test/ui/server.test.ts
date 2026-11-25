@@ -208,6 +208,28 @@ describe("mp ui server (11.5)", () => {
     expect(job.summary).toBe("새로 분석할 자료 없음 · 크기 초과 1개");
   });
 
+  it("all: runs scan → group → apply → keywords → master in order, collects summaries, and stops at the first failure", async () => {
+    const dir = await mkTmp("mp-stub-"); dirs.push(dir);
+    const stub = join(dir, "stub.mjs");
+    await writeFile(stub, `const k = process.argv[2]; console.log("step " + k); console.log("@@summary " + k + " ok"); process.exit(process.env.FAIL_AT === k ? 5 : 0);`);
+    const { call } = await setup(stub);
+    const wait = async () => { let job: any; for (let i = 0; i < 200; i++) { job = (await call("GET", "/api/job")).json.job; if (!job.running) break; await new Promise((r) => setTimeout(r, 30)); } return job; };
+    expect((await call("POST", "/api/job", { kind: "all" })).status).toBe(200);
+    let job = await wait();
+    expect(job.code).toBe(0);
+    expect(job.lines.filter((l: string) => l.startsWith("step "))).toEqual(["step scan", "step group", "step review", "step keywords", "step master"]);
+    expect(job.summary).toBe("스캔: scan ok / 묶기: group ok / 반영: review ok / 키워드: keywords ok / master: master ok");
+    expect(job.progress.overall).toBe(1);
+    process.env.FAIL_AT = "group";
+    try {
+      await call("POST", "/api/job", { kind: "all" });
+      job = await wait();
+    } finally { delete process.env.FAIL_AT; }
+    expect(job.code).toBe(5);
+    expect(job.lines.filter((l: string) => l.startsWith("step "))).toEqual(["step scan", "step group"]);
+    expect(job.summary).toContain("묶기: 실패(코드 5)");
+  });
+
   it("stop: ends the job and its child processes (agent tree), reports stopped, and 409 when nothing runs", async () => {
     const dir = await mkTmp("mp-stub-"); dirs.push(dir);
     const stub = join(dir, "stub.mjs");
