@@ -14,7 +14,7 @@ import { buildUiState, loadFileTitles } from "./model.js";
 import { suggestFolders, defaultOutputDir } from "../setup/folders.js";
 import { createSetupConfig, normalizeFolderInput, validateSetup, SetupError } from "../setup/config.js";
 import { pathKey } from "../core/paths.js";
-import { checkEnvironment, claudeVersion, probeAgent, type AgentProbe } from "../setup/check.js";
+import { checkEnvironment, claudeVersion, ensureClaudeOnPath, probeAgent, type AgentProbe } from "../setup/check.js";
 import { pickFolder, PickUnavailable } from "../setup/pickFolder.js";
 import { expandUniversity } from "../discovery/universities.js";
 import { findDecisionKey, resetScopeDecisions, setScopeDecision } from "../discovery/scopeDecisions.js";
@@ -102,7 +102,8 @@ const sameToken = (a: unknown, b: string) => typeof a === "string" && timingSafe
 
 function send(res: ServerResponse, status: number, body: unknown, type = "application/json; charset=utf-8") {
   const text = typeof body === "string" ? body : JSON.stringify(body);
-  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+  // 다른 localhost 페이지가 이 화면을 iframe에 넣어 클릭을 가로채지 못하게(같은 사이트로 취급되는 다른 포트 포함)
+  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Content-Security-Policy": "frame-ancestors 'none'" });
   res.end(text);
 }
 
@@ -194,6 +195,7 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     // 연쇄 작업은 앞 작업이 성공해야 다음으로 간다(실패·예산 중단·[중지]면 거기서 멈춤)
     const runStep = () => {
       const k = j.stepKinds[j.step];
+      ensureClaudeOnPath();
       if (j.stepKinds.length > 1) push(`── ${j.step + 1}/${j.stepKinds.length} ${STEP_LABEL[k] ?? k} ──`);
       j.summary = null; j.lastOut = null; j.progress = null;
       const child = spawn(process.execPath, [o.cliPath, ...JOBS[k]], { cwd: process.cwd(), env: { ...process.env, MP_OUTPUT_DIR: outDir, MP_PROGRESS: "1" }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, ...spawnGroupOptions() });
@@ -530,7 +532,7 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
         // 주소의 토큰 → 쿠키로 바꾸고 깨끗한 주소로 이동(즐겨찾기 가능). 쿠키는 페이지를 여는 데만 쓰고, API는 페이지 안의 토큰 헤더로만 받는다
         if (t !== null) {
           if (!sameToken(t, token)) return sendLocked(res);
-          res.writeHead(302, { location: "/", "set-cookie": `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`, "cache-control": "no-store" });
+          res.writeHead(302, { "X-Frame-Options": "DENY", "Content-Security-Policy": "frame-ancestors 'none'", location: "/", "set-cookie": `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`, "cache-control": "no-store" });
           return res.end();
         }
         if (!sameToken(cookieOf(req), token)) return sendLocked(res);

@@ -71,6 +71,8 @@ describe("mp ui server (11.5)", () => {
     expect(page.status).toBe(200);
     expect(await page.text()).toContain(TOKEN);
     expect(page.headers.get("cache-control")).toBe("no-store");
+    expect(page.headers.get("x-frame-options")).toBe("DENY");
+    expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect((await fetch(`${base}/`, { headers: { cookie: "mp_t=" + "0".repeat(64) } })).status).toBe(401);
     // 쿠키만으로는 API를 부를 수 없다(헤더 필요)
     expect((await fetch(`${base}/api/state`, { headers: { cookie: cookie.split(";")[0] } })).status).toBe(401);

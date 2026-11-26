@@ -13,7 +13,30 @@ export const PORT_RANGE = Array.from({ length: 11 }, (_, i) => BASE_PORT + i);
 export const APP_ID = "MasterPortfolio";
 
 export const mpHome = () => process.env.MP_HOME_DIR ?? join(homedir(), ".masterportfolio");
-const ensureHome = () => { mkdirSync(mpHome(), { recursive: true }); return mpHome(); };
+const ensureHome = () => { mkdirSync(mpHome(), { recursive: true, mode: 0o700 }); return mpHome(); };
+
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; } };
+/**
+ * 서버는 하나만(빠른 두 번 실행 대비): serve.lock을 배타적으로 만든다. 이미 있고 그 pid가 살아 있으면 false.
+ * 남은 잠금(프로세스 없음)은 지우고 다시 잡는다.
+ */
+export function acquireServeLock(pid = process.pid): boolean {
+  const p = join(ensureHome(), "serve.lock");
+  for (let i = 0; i < 2; i++) {
+    try { writeFileSync(p, String(pid), { flag: "wx", mode: 0o600 }); return true; }
+    catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return true; // 잠금을 못 써도 실행은 막지 않는다
+      const other = Number(readFileSync(p, "utf8").trim());
+      if (other && other !== pid && alive(other)) return false;
+      rmSync(p, { force: true });
+    }
+  }
+  return true;
+}
+export function releaseServeLock(pid = process.pid): void {
+  const p = join(mpHome(), "serve.lock");
+  try { if (Number(readFileSync(p, "utf8").trim()) === pid) rmSync(p, { force: true }); } catch { /* 없음 */ }
+}
 
 /**
  * 한 번 만든 토큰을 계속 쓴다(즐겨찾기한 주소가 쿠키로 열리도록). 파일 권한 0600.
@@ -43,7 +66,7 @@ export function readServerInfo(): ServerInfo | null {
     return Number.isInteger(j.port) && Number.isInteger(j.pid) && typeof j.version === "string" ? j : null;
   } catch { return null; }
 }
-export function writeServerInfo(i: ServerInfo): void { writeFileSync(join(ensureHome(), "server.json"), JSON.stringify(i)); }
+export function writeServerInfo(i: ServerInfo): void { writeFileSync(join(ensureHome(), "server.json"), JSON.stringify(i), { mode: 0o600 }); }
 /** 내가 쓴 기록일 때만 지운다(새 서버가 이미 덮어썼으면 그대로) */
 export function removeServerInfo(pid: number): void {
   if (readServerInfo()?.pid === pid) rmSync(infoPath(), { force: true });
@@ -64,11 +87,11 @@ export async function ping(port: number, timeoutMs = 1500): Promise<Ping | null>
 /** 서버 로그 파일을 덧붙여 연다(5MB가 넘으면 새로 시작). 파일 디스크립터 */
 export function openServerLog(): { fd: number; path: string } {
   const dir = join(ensureHome(), "logs");
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, "server.log");
   let big = false;
   try { big = statSync(path).size > 5 * 1024 * 1024; } catch { /* 없음 */ }
-  return { fd: openSync(path, big ? "w" : "a"), path };
+  return { fd: openSync(path, big ? "w" : "a", 0o600), path };
 }
 
 export type LaunchDeps = {

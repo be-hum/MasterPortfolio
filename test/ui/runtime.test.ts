@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import { readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { mkTmp } from "../helpers/tmp.js";
-import { launch, loadOrCreateToken, ping, readServerInfo, removeServerInfo, tokenId, writeServerInfo, type Ping } from "../../src/ui/runtime.js";
+import { acquireServeLock, releaseServeLock, launch, loadOrCreateToken, ping, readServerInfo, removeServerInfo, tokenId, writeServerInfo, type Ping } from "../../src/ui/runtime.js";
 import { startUiServer } from "../../src/ui/server.js";
 
 const TOKEN = "c".repeat(64);
@@ -20,6 +20,17 @@ describe("runtime files (11.7)", () => {
     expect(b).toBe(a);
     if (process.platform !== "win32") expect(statSync(join(d, "h", "token")).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(d, "h", "token"), "utf8")).toBe(a);
+  });
+
+  it("serve lock: a second live server is refused; a stale lock (dead pid) is taken over", async () => {
+    const d = await mkTmp("mp-rt-"); dirs.push(d); process.env.MP_HOME_DIR = d;
+    expect(acquireServeLock(process.pid)).toBe(true);
+    expect(acquireServeLock(process.pid + 1)).toBe(false); // 이 프로세스가 살아 있음
+    releaseServeLock(process.pid);
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(d, "serve.lock"), "999999"); // 없는 pid
+    expect(acquireServeLock(process.pid)).toBe(true);
+    releaseServeLock(process.pid);
   });
 
   it("server.json is removed only by the process that wrote it", async () => {

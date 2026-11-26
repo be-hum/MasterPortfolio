@@ -291,6 +291,11 @@ function claudeView() {
   }
   return out;
 }
+/** 첫 정리를 바로 시작해도 되는가: Claude 준비 단계를 통과했고(나중에로 넘기지 않음) 점검에서 연결 실패가 없을 때 */
+function claudeReady() {
+  if (!W || W.claudeSkipped || !(W.claude && W.claude.agent && W.claude.agent.ok)) return false;
+  return !(W.checks || []).some(function (c) { return !c.ok && !c.warn && /에이전트|Claude/.test(c.label); });
+}
 function preFoot() {
   if (W.pre === "intro") return el("div", { class: "su-foot" }, [el("span", { class: "grow" }),
     el("button", { type: "submit", class: "btn primary", "data-k": "w:begin", text: "시작하기" })]);
@@ -337,7 +342,7 @@ function wizNext() {
     if (e.length) { W.errs = e; renderSetup(); return; }
     goStep(W.step + 1); return;
   }
-  if (!W.saved) saveSetup(); else finishSetup(true);
+  if (!W.saved) saveSetup(); else finishSetup(claudeReady());
 }
 /** 폼 제출(Enter): 포커스한 입력칸에 따라 추가·찾기, 그 밖은 다음 (한글 조합 중 Enter가 제출로 이어져도 같은 결과) */
 function wizSubmit() {
@@ -440,8 +445,8 @@ function wizFoot() {
   if (W.step === 4 && W.saved) return el("div", { class: "su-foot" }, [
     el("button", { type: "button", class: "btn", "data-k": "w:recheck", disabled: W.checking, onclick: function () { runCheck(W, renderSetup); }, text: "다시 점검" }),
     el("span", { class: "grow" }),
-    el("button", { type: "button", class: "btn ghost", "data-k": "w:later", onclick: function () { finishSetup(false); }, text: "나중에 정리" }),
-    el("button", { type: "submit", class: "btn primary", "data-k": "w:start", text: "첫 정리 시작" })
+    claudeReady() ? el("button", { type: "button", class: "btn ghost", "data-k": "w:later", onclick: function () { finishSetup(false); }, text: "나중에 정리" }) : null,
+    el("button", { type: "submit", class: "btn primary", "data-k": "w:start", text: claudeReady() ? "첫 정리 시작" : "시작하기" })
   ]);
   return el("div", { class: "su-foot" }, [
     el("button", { type: "button", class: "btn", "data-k": "w:prev", disabled: W.step === 1 || b, onclick: wizPrev, text: "이전" }),

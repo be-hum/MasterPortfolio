@@ -68,7 +68,7 @@ button:disabled{cursor:not-allowed;opacity:.5}
 .side{position:sticky;top:60px;height:calc(100vh - 60px);overflow:auto;background:var(--surface);border-right:1px solid var(--line);padding:18px 14px 24px;display:flex;flex-direction:column}
 .main{min-width:0;padding:0 28px 120px;transition:margin-right .2s ease}
 .view{min-width:0;width:100%;max-width:1080px;margin:0 auto;padding:28px 28px 140px}
-@media (min-width:1180px){.app.panel-open .main{margin-right:440px}.app.panel-open .jobbar{right:440px}}
+@media (min-width:1180px){.app.panel-open .main,.app.panel-open .view{margin-right:440px}.app.panel-open .jobbar{right:440px}}
 
 /* 사이드바 */
 .brand{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:0 4px 14px}
@@ -634,7 +634,8 @@ function badge(c) {
   return el("span", { class: "badge c-" + (CONTRIB_CLASS[c] || "none"), title: CONTRIB_HELP[c] || "", text: c });
 }
 
-function row(e, decideMode) {
+function row(e, decideMode, kp) {
+  kp = kp || "row:";
   var c = chipsOf(e);
   var li = el("li", { class: "rw s-" + e.review + (S.sel === e.rel ? " sel" : "") + (S.open === e.rel ? " open" : ""), "data-rel": e.rel });
   if (decideMode) li.appendChild(el("input", { type: "checkbox", class: "pick", "data-k": "pick:" + e.rel, "aria-label": e.title + " 선택", checked: !!S.checked[e.rel],
@@ -652,7 +653,7 @@ function row(e, decideMode) {
   c.out.forEach(function (k) { l2.push(el("span", { class: "chip out", text: outMark(k) + " " + k })); });
   if (c.fallback) l2.push(el("span", { class: "chip out faded", text: c.fallback, title: "성과 키워드 없음 — 성과 첫 항목" }));
   if (!c.kw.length && !c.out.length && !c.fallback) l2.push(el("span", { class: "muted", text: [e.org, e.role].filter(Boolean).join(" · ") || "키워드 없음" }));
-  var btn = el("button", { type: "button", class: "row", "data-k": "row:" + e.rel, "aria-current": S.open === e.rel ? "true" : null,
+  var btn = el("button", { type: "button", class: "row", "data-k": kp + e.rel, "aria-current": S.open === e.rel ? "true" : null,
     onclick: function () { openItem(e.rel); }, onfocus: function () { S.sel = e.rel; markSel(); } }, [
     el("span", { class: "dot s-" + e.review, title: REVIEW_LABEL[e.review] }, [el("span", { class: "sr", text: REVIEW_LABEL[e.review] })]),
     el("span", { class: "rm" }, [
@@ -1316,14 +1317,14 @@ function homeView() {
   ]);
   var groups = groupList(live, "category");
   var cats = groups.length ? el("div", { class: "cats" }, groups.map(function (g) {
-    return el("button", { type: "button", class: "cat", "data-k": "cat:" + g.key, onclick: function () { S.todo = null; location.hash = "#" + g.key; } },
+    return el("button", { type: "button", class: "cat", "data-k": "cat:" + g.key, onclick: function () { S.view = "category"; resetFilters(); location.hash = "#" + g.key; } },
       [el("b", { text: String(g.items.length) }), el("span", { text: g.label })]);
   })) : null;
   var recent = live.slice().sort(function (a, b) { return endOf(b.period) < endOf(a.period) ? -1 : endOf(b.period) > endOf(a.period) ? 1 : 0; }).slice(0, 6);
   return [hero,
     cats ? el("h2", { class: "h2 sec-gap", text: "분류별 경험" }) : null, cats,
     recent.length ? el("h2", { class: "h2 sec-gap" }, ["최근 경험", el("button", { type: "button", class: "linklike", onclick: function () { go("#/exp"); }, text: "전체 보기" })]) : null,
-    recent.length ? el("ul", { class: "rows" }, recent.map(function (e) { return row(e, false); })) : null];
+    recent.length ? el("ul", { class: "rows" }, recent.map(function (e) { return row(e, false, "home-row:"); })) : null];
 }
 function helpView() {
   var card = function (title, kids) { return el("section", { class: "panel-card" }, [el("h2", { text: title })].concat(kids)); };
@@ -1393,7 +1394,7 @@ document.addEventListener("keydown", function (ev) {
     return;
   }
   if (editable(t)) return;
-  if (ev.key === "/") { ev.preventDefault(); if (S.route !== "exp") location.hash = "#/exp"; setTimeout(function () { $("q").focus(); $("q").select(); }, 0); return; }
+  if (ev.key === "/") { ev.preventDefault(); if (S.route !== "exp") { location.hash = "#/exp"; route(false); } $("q").focus(); $("q").select(); return; }
   if (S.route !== "exp") return;
   if (ev.key === "j" || ev.key === "k") {
     if (!S.order.length) return;
@@ -1471,7 +1472,7 @@ ${live ? `  <div class="hintbar" id="hintbar" role="status" hidden></div>\n` : "
   <div class="list" id="list"></div>
   <p class="hint"><kbd>/</kbd> 찾기 · <kbd>j</kbd> <kbd>k</kbd> 이동 · <kbd>Enter</kbd> 열기 · <kbd>Esc</kbd> 닫기</p>
 </main>
-${live ? `<section class="view" id="view" aria-live="polite"></section>
+${live ? `<section class="view" id="view"></section>
 ` : ""}<aside class="panel" id="panel" aria-label="경험 상세" aria-hidden="true"></aside>
 ${live ? `<div class="jobbar" id="jobbar" hidden></div>\n` : ""}</div>
 ${live ? `<div class="setup" id="setup" hidden></div>\n<div class="overlay" id="settings" role="dialog" aria-modal="true" aria-labelledby="set-title" hidden></div>\n` : ""}<div class="toast" id="toast" role="status" aria-live="polite"></div>

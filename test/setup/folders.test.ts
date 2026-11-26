@@ -91,3 +91,19 @@ describe("defaultOutputDir", () => {
     expect(await defaultOutputDir({ home: "/h", platform: "linux", exists: () => false })).toBe("/h/MasterPortfolio");
   });
 });
+
+describe("ensureClaudeOnPath", () => {
+  it("appends existing known install dirs once (posix), keeps PATH otherwise", async () => {
+    const { ensureClaudeOnPath } = await import("../../src/setup/check.js");
+    const { mkdtempSync, mkdirSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+    ensureClaudeOnPath(env, "linux");
+    const once = env.PATH!;
+    ensureClaudeOnPath(env, "linux");
+    expect(env.PATH).toBe(once);
+    expect(once.startsWith("/usr/bin")).toBe(true);
+    void mkdtempSync; void mkdirSync; void tmpdir; void join;
+  });
+});

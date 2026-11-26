@@ -3,7 +3,8 @@ import { resolveOutputDir } from "../core/paths.js";
 import { startUiServer, type SetupDeps } from "../ui/server.js";
 import { openBrowser } from "../ui/open.js";
 import { renderApp } from "../ui/app.js";
-import { PORT_RANGE, loadOrCreateToken, removeServerInfo, writeServerInfo } from "../ui/runtime.js";
+import { PORT_RANGE, acquireServeLock, loadOrCreateToken, releaseServeLock, removeServerInfo, writeServerInfo } from "../ui/runtime.js";
+import { ensureClaudeOnPath } from "../setup/check.js";
 import { VERSION } from "../version.js";
 import { writeOutputPointer } from "../core/paths.js";
 import { defaultOutputDir } from "../setup/folders.js";
@@ -45,11 +46,17 @@ export async function runServe(o: { ports?: number[]; cliPath?: string; setupDep
     const def = await defaultOutputDir().catch(() => null);
     if (def && hasConfig(def)) { await writeOutputPointer(def); out = def; }
   }
+  // 이미 다른 화면 서버가 돌고 있으면(빠른 두 번 실행) 이 서버는 띄우지 않는다. 실행기가 기존 서버를 연다
+  if (!acquireServeLock()) { console.log(`[${new Date().toISOString()}] 화면 서버가 이미 실행 중이라 새로 띄우지 않습니다.`); return 0; }
+  ensureClaudeOnPath();
   const token = loadOrCreateToken();
   let stop: () => void = () => {};
   const stopped = new Promise<void>((ok) => { stop = ok; });
-  const srv = await startUiServer({ out, ports: o.ports ?? PORT_RANGE, token, version: VERSION, cliPath: o.cliPath ?? process.argv[1],
+  let srv: Awaited<ReturnType<typeof startUiServer>>;
+  try {
+    srv = await startUiServer({ out, ports: o.ports ?? PORT_RANGE, token, version: VERSION, cliPath: o.cliPath ?? process.argv[1],
     html: (t) => renderApp({ mode: "live", token: t }), setupDeps: o.setupDeps, onShutdown: () => stop() });
+  } catch (e) { releaseServeLock(); throw e; }
   writeServerInfo({ port: srv.port, pid: process.pid, version: VERSION });
   console.log(`[${new Date().toISOString()}] MasterPortfolio ${VERSION} 화면 서버: http://localhost:${srv.port}`);
   const SIGNALS: NodeJS.Signals[] = process.platform === "win32" ? ["SIGINT", "SIGBREAK"] : ["SIGINT", "SIGTERM", "SIGHUP"];
@@ -59,6 +66,7 @@ export async function runServe(o: { ports?: number[]; cliPath?: string; setupDep
   await stopped;
   for (const s of SIGNALS) process.off(s, onSig);
   removeServerInfo(process.pid);
+  releaseServeLock();
   await srv.close();
   console.log(`[${new Date().toISOString()}] 화면 서버를 종료했습니다.`);
   return 0;

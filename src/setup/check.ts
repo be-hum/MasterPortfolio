@@ -1,5 +1,8 @@
 import { access, constants, readdir } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import { exec, execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { foreignConfigMessage } from "../core/paths.js";
 import { loadConfig } from "../config/config.js";
@@ -7,6 +10,7 @@ import { AcpBridge } from "../agent/bridge.js";
 import { agentForStage } from "../agent/agents.js";
 
 const run = promisify(execFile);
+const runShell = promisify(exec);
 
 export type AgentProbe = { ok: true } | { ok: false; kind: string; label: string; fix: string };
 
@@ -31,11 +35,33 @@ export async function probeAgent(config: Awaited<ReturnType<typeof loadConfig>>)
   } finally { await b.stop(); }
 }
 
+/**
+ * 오래 도는 백그라운드 서버는 시작할 때의 PATH를 그대로 가진다. 화면을 띄운 뒤 Claude Code를 설치하면
+ * (Windows는 레지스트리 PATH에만 추가됨) 서버가 claude를 못 찾으므로, 흔한 설치 위치를 PATH에 더한다.
+ * 이미 있으면 그대로. 이 프로세스와 이후 띄우는 작업에 함께 적용된다.
+ */
+export function ensureClaudeOnPath(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): void {
+  const home = homedir();
+  const dirs = platform === "win32"
+    ? [join(home, ".local", "bin"), env.APPDATA ? join(env.APPDATA, "npm") : null, env.LOCALAPPDATA ? join(env.LOCALAPPDATA, "Programs", "claude") : null]
+    : [join(home, ".local", "bin"), join(home, ".claude", "local"), "/opt/homebrew/bin", "/usr/local/bin"];
+  const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  const sepC = platform === "win32" ? ";" : ":";
+  const cur = (env[key] ?? "").split(sepC).filter(Boolean);
+  const norm = (p: string) => (platform === "win32" ? p.toLowerCase().replace(/[\\/]+$/, "") : p.replace(/\/+$/, ""));
+  const have = new Set(cur.map(norm));
+  const add = dirs.filter((d): d is string => !!d && existsSync(d) && !have.has(norm(d)));
+  if (add.length) env[key] = [...cur, ...add].join(sepC);
+}
+
 /** Claude Code CLI가 설치돼 있으면 버전 문자열, 없으면 null(처음 화면 11.7) */
 export async function claudeVersion(): Promise<string | null> {
+  ensureClaudeOnPath();
   try {
-    // Windows의 npm 설치본은 claude.cmd라 셸을 거친다(인자는 고정값만)
-    const { stdout } = await run("claude", ["--version"], { windowsHide: true, timeout: 15_000, shell: process.platform === "win32" });
+    // Windows의 npm 설치본은 claude.cmd라 셸을 거친다(고정 문자열 한 줄로 넘김)
+    const { stdout } = process.platform === "win32"
+      ? await runShell("claude --version", { windowsHide: true, timeout: 15_000 })
+      : await run("claude", ["--version"], { windowsHide: true, timeout: 15_000 });
     const v = String(stdout).trim().split(/\r?\n/)[0];
     return v || null;
   } catch { return null; }
