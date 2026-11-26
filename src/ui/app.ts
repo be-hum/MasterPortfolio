@@ -339,8 +339,12 @@ details summary{cursor:pointer;font-size:12.5px;color:var(--ink-2)}
 .doc{padding:24px 18px}
 .topnav{padding:0 12px;gap:2px}
 .logo{margin-right:6px}.logo-name{display:none}
-.tab{padding:0 8px;font-size:13.5px}
-.tn-sub{display:none}
+.tab{padding:0 7px;font-size:13.5px}
+.tn-sub,.tn-l{display:none}
+.tabs{min-width:0;overflow-x:auto;scrollbar-width:none}
+.tn-right .btn{padding:0 9px}
+.panel-card{padding:18px 16px}
+.hello{font-size:21px}
 .rows{grid-template-columns:minmax(0,1fr)}
 .panel{width:100%;border-left:0}
 .jobbar{left:0;padding:8px 16px}
@@ -1030,7 +1034,7 @@ function staleDays() {
   return d >= STALE_DAYS ? d : null;
 }
 function renderHints() {
-  var H = $("hintbar");
+  var H = HINTBAR;
   if (!H) return;
   // 안내마다 [설명, 버튼] 두 요소를 만들고, 한 안내를 한 줄(hb-row)로 묶는다
   var tmp = el("div", {});
@@ -1231,8 +1235,9 @@ function getTheme() {
 function applyTheme(t) {
   document.documentElement.setAttribute("data-theme", t);
   var th = THEMES.filter(function (x) { return x[0] === t; })[0];
-  var b = $("theme-btn");
-  b.textContent = th[2] + " " + th[1];
+  var b = clear($("theme-btn"));
+  b.appendChild(el("span", { "aria-hidden": "true", text: th[2] }));
+  b.appendChild(el("span", { class: "tn-l", text: th[1] }));
   b.title = "화면 테마: " + th[1] + " (누르면 다음 테마)";
 }
 function cycleTheme() {
@@ -1254,18 +1259,18 @@ function route(first) {
   document.title = ({ home: "홈", exp: "경험", master: "마스터", help: "도움말" })[r] + " · MasterPortfolio";
   BASE_TITLE = document.title;
   // 안내 배너는 경험 화면에서는 목록 위, 다른 화면에서는 페이지 맨 위에 둔다
-  var H = $("hintbar");
-  if (r === "exp") $("main").insertBefore(H, $("bulk"));
+  if (r === "exp") $("main").insertBefore(HINTBAR, $("bulk"));
   render();
   // 분류 앵커(#c-0 등)는 그 분류로 스크롤, 메뉴 이동은 맨 위로
   var anchor = r === "exp" && location.hash && !/^#\//.test(location.hash) ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
   if (anchor) anchor.scrollIntoView();
   else if (changed && !first) window.scrollTo(0, 0);
 }
+/** 안내 배너는 화면마다 자리를 옮기므로 요소를 한 번 잡아 두고 쓴다(다시 그릴 때 문서에서 잠깐 빠져도 잃지 않게) */
+var HINTBAR = LIVE ? document.getElementById("hintbar") : null;
 function renderView() {
   var V = clear($("view"));
-  var H = $("hintbar");
-  V.appendChild(H);
+  V.appendChild(HINTBAR);
   var body = S.route === "home" ? homeView() : S.route === "master" ? masterView() : helpView();
   body.forEach(function (n) { if (n) V.appendChild(n); });
 }
@@ -1446,7 +1451,7 @@ export function renderApp(o: AppOptions): string {
 <header class="topnav" id="topnav">
   <a class="logo" href="${live ? "#/" : "#"}" aria-label="MasterPortfolio 홈"><span class="logo-mark" aria-hidden="true">M</span><span class="logo-name">MasterPortfolio</span></a>
   ${live ? `<nav class="tabs" id="tabs" aria-label="메뉴"><a class="tab" href="#/" data-r="home">홈</a><a class="tab" href="#/exp" data-r="exp">경험</a><a class="tab" href="#/master" data-r="master">마스터</a><a class="tab" href="#/help" data-r="help">도움말</a></nav>` : ""}
-  <div class="tn-right"><span class="tn-sub" id="brand-sub"></span><button type="button" class="btn sm ghost" id="theme-btn" aria-label="화면 테마 바꾸기"></button>${live ? `<button type="button" class="btn sm" id="set-btn" aria-haspopup="dialog">⚙ 설정</button>` : ""}</div>
+  <div class="tn-right"><span class="tn-sub" id="brand-sub"></span><button type="button" class="btn sm ghost" id="theme-btn" aria-label="화면 테마 바꾸기"></button>${live ? `<button type="button" class="btn sm" id="set-btn" aria-haspopup="dialog" aria-label="설정"><span aria-hidden="true">⚙</span><span class="tn-l">설정</span></button>` : ""}</div>
 </header>
 <div class="app" id="app">
 <aside class="side" id="side" aria-label="목차와 필터">

@@ -6,6 +6,21 @@
 export const SETUP_CSS = `
 .app[hidden],.setup[hidden],.overlay[hidden]{display:none}
 .setup{max-width:780px;margin:0 auto;padding:28px 20px 80px}
+/* 처음 설정 중에는 메뉴·설정 버튼을 숨긴다(설정을 마친 뒤에 쓴다) */
+.in-setup .tabs,.in-setup #set-btn{display:none}
+.su-card{border-radius:18px;box-shadow:var(--shadow-1);padding:26px 28px}
+.flow{list-style:none;margin:18px 0 6px;padding:0;display:grid;gap:10px}
+.flow li{display:flex;gap:14px;align-items:flex-start;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)}
+.flow-n{display:inline-grid;place-items:center;flex:none;width:30px;height:30px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:800}
+.flow strong{display:block;font-size:15px}
+.flow p{margin:2px 0 0;color:var(--ink-2);font-size:13.5px}
+.privacy{margin-top:16px;padding:16px 18px;border-radius:14px;background:var(--accent-soft);color:var(--ink)}
+.privacy h2,.howto h2{margin:0 0 8px;font-size:15px}
+.privacy ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--ink-2)}
+.privacy li{margin:4px 0}
+.howto{margin-top:14px;padding:16px 18px;border:1px solid var(--line);border-radius:14px}
+.howto p{margin:4px 0;color:var(--ink-2);font-size:13.5px}
+.cmd{margin:8px 0;padding:10px 12px;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.5 ui-monospace,"D2Coding",Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;user-select:all}
 .su-head{display:flex;align-items:baseline;gap:10px;margin:0 2px 16px}
 .steps{list-style:none;margin:0 0 12px;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .st{display:flex;align-items:center;gap:8px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:13px;color:var(--ink-3)}
@@ -184,6 +199,7 @@ function wizInit() {
 function enterSetup() {
   S.setup = true;
   $("app").hidden = true; $("setup").hidden = false;
+  document.body.classList.add("in-setup");
   $("brand-sub").textContent = "처음 설정";
   if (W) { renderSetup(); return; }
   W = wizInit();
@@ -376,7 +392,8 @@ function postSetup(payload) {
 function finishSetup(start) {
   W = null; S.setup = false; S.loading = true;
   clear($("setup")); $("setup").hidden = true; $("app").hidden = false;
-  $("brand-sub").textContent = "로컬 편집 화면";
+  document.body.classList.remove("in-setup");
+  $("brand-sub").textContent = "";
   render();
   load().then(function () {
     if (start) { startJob("all"); return; }
@@ -389,7 +406,6 @@ function renderSetup() {
   keepFocus(function () {
     var R = clear($("setup"));
     var st = W.step;
-    R.appendChild(el("header", { class: "su-head" }, [el("span", { class: "brand-name", text: "Master Record" }), el("span", { class: "brand-sub", text: "처음 설정" })]));
     if (W.pre) {
       var pb = W.pre === "intro" ? introView() : claudeView();
       pb.push(errList(W.errs)); pb.push(preFoot());
