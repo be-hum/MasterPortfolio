@@ -60,7 +60,8 @@ describe("renderApp (11.5)", () => {
     expect(live).toContain('id="setup"');
     expect(live).toContain('id="settings"');
     for (const p of ["/api/setup", "/api/setup/suggest?university=", "/api/pick-folder", "/api/check", "/api/settings", "/api/settings/scope-reset"]) expect(s).toContain(p);
-    expect(live).not.toMatch(/https?:\/\//);
+    // 외부 리소스를 불러오지 않는다(설치 안내의 명령어 문자열은 허용)
+    expect(live).not.toMatch(/(src|href)\s*=\s*["']?(https?:)?\/\/|url\(\s*["']?https?:|@import/i);
     expect(live.match(/<\/script>/g)).toHaveLength(1);
     expect(html).not.toContain('id="setup"');
     expect(html).not.toContain('id="settings"');
