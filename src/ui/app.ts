@@ -117,6 +117,8 @@ button:disabled{cursor:not-allowed;opacity:.5}
 .hintbar .hb-btns{display:flex;flex-wrap:wrap;gap:6px}
 .bulk{position:sticky;top:62px;z-index:9;display:flex;align-items:center;gap:10px;margin:0 0 6px;padding:8px 12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 1px 2px rgba(16,24,40,.05)}
 .bulk[hidden]{display:none}
+/* display를 지정한 요소(.hintbar 등)도 hidden이면 반드시 숨긴다 */
+[hidden]{display:none!important}
 .bulk-all{display:inline-flex;align-items:center;gap:6px;font-size:13px}
 .bulk-n{font-size:12.5px;color:var(--ink-3)}
 
@@ -348,7 +350,7 @@ function toast(msg, kind) {
   S.toastT = setTimeout(function () { t.className = "toast"; }, kind === "err" ? 5000 : 2600);
 }
 function errMsg(r) { return (r.json && r.json.error) || "요청 실패 (" + r.status + ")"; }
-function netErr() { toast("서버에 연결할 수 없습니다. 터미널에서 mp ui가 실행 중인지 확인하세요.", "err"); }
+function netErr() { toast("MasterPortfolio에 연결할 수 없습니다. 프로그램을 닫았다면 다시 실행하세요.", "err"); }
 
 function api(method, path, body) {
   var h = { "X-MP-Token": TOKEN };
@@ -375,7 +377,7 @@ function load() {
     }
     renderPrint(); render();
     if (S.settings) renderSettings(); // 작업이 끝나면 저장·초기화 버튼을 다시 켠다
-  }, function () { S.loading = false; S.error = "서버에 연결할 수 없습니다. 터미널에서 mp ui가 실행 중인지 확인하세요."; render(); });
+  }, function () { S.loading = false; S.error = "MasterPortfolio에 연결할 수 없습니다. 프로그램을 닫았다면 다시 실행하세요."; render(); });
 }
 
 /* ---------- 렌더 ---------- */
@@ -468,7 +470,7 @@ function renderSide(groups) {
 
   if (LIVE) sb.appendChild(el("button", { type: "button", class: "btn side-set", "data-k": "settings", "aria-haspopup": "dialog", title: "스캔 폴더·요금제·폴더 범위 판단·환경 점검", onclick: openSettings, text: "⚙ 설정" }));
   if (LIVE && S.output) sb.appendChild(el("p", { class: "side-foot", text: "결과 폴더 · " + S.output }));
-  else if (!LIVE) sb.appendChild(el("p", { class: "side-foot", text: "내 PC에만 저장된 파일입니다. 수정은 experiences/의 경험 카드에서 한 뒤 mp master를 다시 실행하세요." }));
+  else if (!LIVE) sb.appendChild(el("p", { class: "side-foot", text: "내 PC에만 저장된 파일입니다. MasterPortfolio 화면에서 채택·답변·편집하면 이 파일도 자동으로 다시 만들어집니다." }));
 }
 
 function renderTop(vis) {
@@ -515,7 +517,7 @@ function renderList(groups) {
   if (S.error) { L.appendChild(emptyBox("불러오지 못했습니다", S.error, el("button", { type: "button", class: "btn", onclick: load, text: "다시 시도" }))); return; }
   if (!S.exps.length) {
     L.appendChild(LIVE ? emptyBox("아직 경험 카드가 없습니다", "아래 작업 바에서 [새 자료 스캔] → [경험 묶기]를 실행하면 여기에 나타납니다.")
-      : emptyBox("채택된 경험이 없습니다", "mp review(또는 mp ui)로 경험을 채택한 뒤 mp master를 다시 실행하세요."));
+      : emptyBox("채택된 경험이 없습니다", "MasterPortfolio 화면에서 경험을 [채택]하면 이 파일에 자동으로 들어갑니다."));
     return;
   }
   if (!groups.length) {

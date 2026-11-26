@@ -459,7 +459,7 @@ function fetchSettings(resetForm, focus) {
     if (resetForm || !ST.form) { ST.form = formOf(r.json); ST.base = formOf(r.json); ST.pct = String(Math.round(r.json.fiveHourShare * 100)); }
     renderSettings();
     if (focus) { var t = $("set-title"); if (t) t.focus(); }
-  }, function () { if (ST) { ST.err = "서버에 연결할 수 없습니다. 터미널에서 mp ui가 실행 중인지 확인하세요."; renderSettings(); } });
+  }, function () { if (ST) { ST.err = "MasterPortfolio에 연결할 수 없습니다. 프로그램을 닫았다면 다시 실행하세요."; renderSettings(); } });
 }
 function setDirty() { return !!(ST && ST.form && (Object.keys(settingsDiff(ST.form, ST.base)).length || pctToShare(ST.pct) !== ST.base.fiveHourShare)); }
 function closeSettings(force) {

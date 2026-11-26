@@ -9,7 +9,7 @@ import { runScopeCommand } from "./commands/scope.js";
 import { runGroup } from "./commands/group.js";
 import { runReview } from "./commands/review.js";
 import { runKeywords } from "./commands/keywords.js";
-import { runMaster } from "./commands/master.js";
+import { refreshMaster, runMaster } from "./commands/master.js";
 import { runUi } from "./commands/ui.js";
 import { runStart } from "./commands/start.js";
 
@@ -27,7 +27,7 @@ function parseBudget(v: string): number {
 
 export function buildProgram(): Command {
   const program = new Command();
-  program.name("mp").description("MasterPortfolio: 이력서·포트폴리오 자료 인벤토리").version("0.3.0");
+  program.name("mp").description("MasterPortfolio: 이력서·포트폴리오 자료 인벤토리").version("0.3.1");
   program.exitOverride();
   program.command("init").description("대학명·스캔 폴더·에이전트 설정")
     .option("--non-interactive").option("--university <name>").option("--folders <paths...>").option("--agent <name>").option("--output <dir>")
@@ -54,18 +54,18 @@ export function buildProgram(): Command {
   program.command("group").description("상·중 파일 카드를 경험 카드로 묶고 보강 질문 생성")
     .option("--regroup", "경험 아님으로 남긴 카드도 다시 보냄").option("--yes", "확인 생략").option("--log-prompts", "전송 프롬프트 저장")
     .option("--budget <share>", "이번 실행이 쓸 5시간 사용량 창 비율(0~1)", parseBudget)
-    .action(async (o) => { process.exitCode = (await runGroup({ regroup: o.regroup, yes: o.yes, logPrompts: o.logPrompts, budget: o.budget })).code; });
+    .action(async (o) => { process.exitCode = (await runGroup({ regroup: o.regroup, yes: o.yes, logPrompts: o.logPrompts, budget: o.budget })).code; await refreshMaster(); });
   program.command("review").description("경험별 질의응답 → 답변을 카드에 반영")
     .option("--file", "질문을 review.md로 쓰기").option("--apply", "채운 review.md 반영").option("--all", "가치 '하' 경험도 포함")
     .option("--apply-only", "질의응답 없이 반영 대기 경험만 반영")
     .option("--accept-edits", "바깥에서 편집된 경험 카드를 현재 내용대로 받아들임")
     .option("--yes", "확인 생략").option("--log-prompts", "전송 프롬프트 저장")
     .option("--budget <share>", "이번 실행이 쓸 5시간 사용량 창 비율(0~1)", parseBudget)
-    .action(async (o) => { process.exitCode = (await runReview({ file: o.file, apply: o.apply, all: o.all, acceptEdits: o.acceptEdits, applyOnly: o.applyOnly, yes: o.yes, logPrompts: o.logPrompts, budget: o.budget })).code; });
+    .action(async (o) => { process.exitCode = (await runReview({ file: o.file, apply: o.apply, all: o.all, acceptEdits: o.acceptEdits, applyOnly: o.applyOnly, yes: o.yes, logPrompts: o.logPrompts, budget: o.budget })).code; await refreshMaster(); });
   program.command("keywords").description("경험·성과 키워드 만들기(빠른 모델)")
     .option("--all", "이미 있는 것도 다시").option("--yes", "확인 생략").option("--log-prompts", "전송 프롬프트 저장")
     .option("--budget <share>", "이번 실행이 쓸 5시간 사용량 창 비율(0~1)", parseBudget)
-    .action(async (o) => { process.exitCode = (await runKeywords({ all: o.all, yes: o.yes, logPrompts: o.logPrompts, budget: o.budget })).code; });
+    .action(async (o) => { process.exitCode = (await runKeywords({ all: o.all, yes: o.yes, logPrompts: o.logPrompts, budget: o.budget })).code; await refreshMaster(); });
   program.command("master").description("채택된 경험 카드로 master.md 생성(LLM 없음)")
     .action(async () => { process.exitCode = (await runMaster()).code; });
   program.command("ui").description("브라우저에서 결과 보기·결정·답변·반영")

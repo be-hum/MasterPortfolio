@@ -21,6 +21,7 @@ import { findDecisionKey, resetScopeDecisions, setScopeDecision } from "../disco
 import { isoNow } from "../store/cards.js";
 import { loadConfig, saveConfig } from "../config/config.js";
 import { killTree, spawnGroupOptions } from "./killTree.js";
+import { refreshMaster } from "../commands/master.js";
 import { CHAIN, PROGRESS_PREFIX, SUMMARY_PREFIX, chainProgress, etaSeconds, overallProgress, type ProgressEvent } from "../core/progress.js";
 
 export type SetupDeps = {
@@ -28,6 +29,8 @@ export type SetupDeps = {
   create?: typeof createSetupConfig; defaultOutput?: () => Promise<string>;
   /** 화면을 열 때 알릴 새 폴더(기본: Windows에서 WSL 홈 안의 자료 폴더) */
   folderHints?: (keywords: string[]) => Promise<FolderHint[]>;
+  /** master 자동 갱신(테스트 주입용) */
+  refreshMaster?: (out: string) => Promise<void>;
   /** 에이전트(Claude) 연결·로그인 확인 */
   probe?: (config: Awaited<ReturnType<typeof loadConfig>>) => Promise<AgentProbe>;
 };
@@ -39,7 +42,7 @@ async function defaultFolderHints(keywords: string[]): Promise<FolderHint[]> {
   return all.filter((f) => f.kind === "cloud" || f.kind === "drive" || f.kind === "wsl").map(({ path, label, kind }) => ({ path, label, kind }));
 }
 /** out이 null이면 설정 모드: 처음 설정 API만 열려 있다 */
-export type UiServerOptions = { out: string | null; port?: number; token: string; cliPath: string; html: (token: string) => string; onShutdown?: () => void; setupDeps?: SetupDeps };
+export type UiServerOptions = { out: string | null; port?: number; token: string; cliPath: string; html: (token: string) => string; onShutdown?: () => void; setupDeps?: SetupDeps; masterDelayMs?: number };
 export type JobProgress = { stage: string; done: number; total: number; overall: number | null; etaSec: number | null };
 export type JobState = { kind: string; running: boolean; code: number | null; lines: string[]; progress: JobProgress | null;
   /** 완료 요약: 작업이 보낸 @@summary, 없으면 마지막 표준 출력 줄 */
@@ -215,6 +218,19 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
 
   // 에이전트 연결 확인: 화면을 열 때 한 번(실패했으면 [다시 확인]으로 다시). 작업 중에는 확인하지 않는다
   let probeCache: Promise<AgentProbe> | null = null;
+
+  // master 자동 갱신: 연속 클릭을 묶어 마지막 쓰기 0.4초 뒤 한 번. 작업 중이면 건너뜀(작업 쪽 명령이 끝날 때 갱신)
+  const MASTER_WRITES = new Set(["/api/decide", "/api/answer", "/api/edit", "/api/accept-edit"]);
+  let masterTimer: NodeJS.Timeout | null = null;
+  const scheduleMaster = () => {
+    if (masterTimer) clearTimeout(masterTimer);
+    masterTimer = setTimeout(() => {
+      masterTimer = null;
+      const dir = out;
+      if (dir === null || job?.running) return;
+      void serial(() => (sd.refreshMaster ?? refreshMaster)(dir));
+    }, o.masterDelayMs ?? 400);
+  };
 
   const SETUP_OPEN = new Set(["/api/setup", "/api/setup/suggest", "/api/pick-folder", "/api/check", "/api/shutdown"]);
   const busyErr = () => new HttpError(409, "작업 실행 중에는 수정할 수 없습니다. 끝난 뒤 다시 시도하세요.");
@@ -394,6 +410,8 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       return send(res, 200, { ok: true, job: jobState() });
     }
     // 작업(자식 프로세스)이 카드를 쓰는 동안에는 UI 쓰기를 막는다(서로의 저장이 편집으로 오인되지 않게)
+    // 카드를 바꾸는 쓰기 뒤에는 master.md·master.html을 곧 다시 만든다(화면에서 채택해도 master가 늘 최신)
+    if (MASTER_WRITES.has(path)) scheduleMaster();
     return serial(async () => {
       // 큐에서 기다리는 동안 작업이 시작됐을 수 있으므로 실행 직전에 검사한다
       if (job?.running) throw busyErr();
@@ -497,6 +515,7 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     url: `http://127.0.0.1:${port}/?t=${token}`, port,
     close: () => new Promise<void>((ok) => {
       if (job?.child) killTree(job.child);
+      if (masterTimer) clearTimeout(masterTimer);
       server.close(() => ok());
       server.closeAllConnections();
     }),

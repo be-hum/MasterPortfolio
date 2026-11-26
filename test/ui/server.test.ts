@@ -65,6 +65,16 @@ describe("mp ui server (11.5)", () => {
     expect(ok.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("master.md·master.html are rebuilt automatically after a decision (debounced), so master is never stale", async () => {
+    const { out, call, exps } = await setup();
+    const rel = (await exps())[0].rel;
+    expect((await call("POST", "/api/decide", { rels: [rel], decision: "adopted" })).status).toBe(200);
+    let md = "";
+    for (let i = 0; i < 100; i++) { try { md = await readFile(join(out, "master.md"), "utf8"); } catch { /* 아직 */ } if (md.includes("보고서") || md.includes("발표")) break; await new Promise((r) => setTimeout(r, 50)); }
+    expect(md).not.toContain("채택된 경험이 없습니다");
+    expect(await readFile(join(out, "master.html"), "utf8")).toContain("Master Record");
+  });
+
   it("decide, answer (masked), edit (clamped, strict)", async () => {
     const { call, exps } = await setup();
     const rel = (await exps())[0].rel;

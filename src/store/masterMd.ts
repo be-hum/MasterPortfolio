@@ -63,8 +63,8 @@ export function toItem(e: LoadedExperience, category: Category, fileTitles: Map<
 
 export function renderMaster(exps: LoadedExperience[], fileTitles: Map<string, string | null>): string {
   const view = buildMasterView(exps, fileTitles);
-  const lines = ["# Master Record", "", "> 자동 생성 — 수정은 experiences/의 경험 카드에서 하세요. `mp master`를 다시 실행하면 이 파일 전체를 다시 씁니다.", ""];
-  if (!view.total) return [...lines, "채택된 경험이 없습니다. `mp group`과 `mp review`를 먼저 실행하세요.", ""].join("\n");
+  const lines = ["# Master Record", "", "> 자동 생성 — 화면에서 채택·답변·편집할 때마다 다시 만들어집니다. 직접 고치지 말고 화면(또는 experiences/의 경험 카드)에서 수정하세요.", ""];
+  if (!view.total) return [...lines, "채택된 경험이 없습니다. MasterPortfolio 화면에서 경험을 [채택]하면 이 파일에 자동으로 들어갑니다(명령줄: `mp review`).", ""].join("\n");
   for (const { category, items } of view.groups) {
     lines.push(`## ${category}`, "");
     for (const i of items) {
