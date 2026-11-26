@@ -16,6 +16,12 @@ MasterPortfolio (macOS)
   한글에서 [다른 이름으로 저장] → HWPX 또는 PDF로 저장해 두면 다음 스캔에서 내용까지 분석합니다.
 - DOC·PPT(옛 Office 형식)도 위치만 남깁니다. DOCX·PPTX·PDF로 저장하면 분석합니다.
 
+실행 방식
+- 실행하면 창 없이 뒤에서 서버가 돌고 브라우저에서 http://localhost:4317 이 열립니다(사용 중이면 4318~4327).
+- 이 주소를 즐겨찾기해 두면 언제든 다시 열 수 있습니다. 끌 때는 화면 아래의 [종료]를 누릅니다.
+- 처음 화면에서 Claude Code 설치·로그인을 확인하고, 안 돼 있으면 방법을 안내합니다.
+- 문제가 생기면 화면의 [도움말] 또는 기록 파일(사용자 폴더/.masterportfolio/logs/server.log)을 보세요.
+
 실행
 1. 압축을 푼 MasterPortfolio 폴더를 응용 프로그램(Applications) 등 원하는 곳으로 옮깁니다.
 2. MasterPortfolio.command 를 처음 열 때는 Control-클릭(또는 오른쪽 클릭) → [열기] → [열기]를 누릅니다.

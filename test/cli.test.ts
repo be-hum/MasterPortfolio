@@ -9,6 +9,6 @@ describe("cli", () => {
     try {
       expect(await main(["node", "mp", "--version"])).toBe(0);
     } finally { (process.stdout as any).write = orig; }
-    expect(out.join("")).toContain("0.3.1");
+    expect(out.join("")).toContain("0.4.0");
   });
 });
