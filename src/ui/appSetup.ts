@@ -138,7 +138,8 @@ function pickNote(ctx, target) {
 function runCheck(ctx, rr) {
   if (ctx.checking) return;
   ctx.checking = true; rr();
-  api("POST", "/api/check", {}).then(function (r) {
+  // 처음 화면에서 이미 Claude 연결을 확인했으면 다시 요청하지 않는다
+  api("POST", "/api/check", { skipAgent: !!(ctx.claude && ctx.claude.agent && ctx.claude.agent.ok) }).then(function (r) {
     ctx.checking = false;
     ctx.checks = r.ok ? r.json.items : [{ ok: false, label: "점검하지 못했습니다", fix: errMsg(r) }];
     rr();
@@ -177,7 +178,7 @@ var STEPS = ["대학", "폴더", "요금제·결과 폴더", "점검"];
 var PLAN_HELP = { 1: "기준 (1배)", 5: "Pro의 5배", 20: "Pro의 20배" };
 
 function wizInit() {
-  return { step: 1, university: "", sugUni: null, keywords: [], kwIn: "", folders: [], pathIn: "", planScale: 1, output: "", outputAuto: true,
+  return { pre: "intro", claude: null, claudeChecking: false, claudeSkipped: false, step: 1, university: "", sugUni: null, keywords: [], kwIn: "", folders: [], pathIn: "", planScale: 1, output: "", outputAuto: true,
     errs: [], busy: null, picking: null, pickMsg: null, saved: false, savedOut: "", checks: null, checking: false };
 }
 function enterSetup() {
@@ -210,13 +211,92 @@ function suggestFor(uni, then) {
     if (then) then();
   }, function () { if (W) { W.busy = null; netErr(); renderSetup(); } });
 }
+/* 처음 화면 앞부분(11.7): 소개 → Claude Code 준비 → 기존 4단계 */
+function goPre(p) {
+  W.pre = p; W.errs = [];
+  renderSetup(); focusStep(); window.scrollTo(0, 0);
+  if (p === "claude" && !W.claude && !W.claudeChecking) checkClaude();
+}
+function checkClaude() {
+  W.claudeChecking = true; renderSetup();
+  api("GET", "/api/claude-status").then(function (r) {
+    if (!W) return;
+    W.claudeChecking = false;
+    W.claude = r.ok ? r.json : { installed: null, agent: { ok: false, kind: "error", label: errMsg(r) } };
+    renderSetup();
+  }, function () { if (W) { W.claudeChecking = false; netErr(); renderSetup(); } });
+}
+var OS_WIN = /Windows/i.test(navigator.userAgent), OS_MAC = /Mac OS X|Macintosh/i.test(navigator.userAgent);
+function introView() {
+  var out = stepHead("내 PC의 자료로 이력서·포트폴리오 경험을 정리합니다", "과제·보고서·발표 자료·코드를 찾아 경험 카드로 묶고, 채택한 경험을 이력서용 Master Record로 만듭니다.");
+  out.push(el("ol", { class: "flow" }, [
+    ["1", "자료 찾기", "고른 폴더에서 PDF·DOCX·PPTX·HWPX·MD·TXT를 찾아 파일마다 요약 카드를 만듭니다."],
+    ["2", "경험 정리", "같은 프로젝트·활동의 카드를 경험으로 묶고, 채택·보류를 고른 뒤 빠진 사실(기간·역할·직접 한 부분)을 질문으로 채웁니다."],
+    ["3", "Master Record", "채택한 경험을 분류·최신순으로 모은 master.html을 만듭니다. 한 줄·STAR 복사, 인쇄·PDF가 됩니다."]
+  ].map(function (f) { return el("li", {}, [el("span", { class: "flow-n", "aria-hidden": "true", text: f[0] }), el("div", {}, [el("strong", { text: f[1] }), el("p", { text: f[2] })])]); })));
+  out.push(el("div", { class: "privacy" }, [
+    el("h2", { text: "개인정보와 사용량" }),
+    el("ul", {}, [
+      el("li", {}, [el("strong", { text: "내 PC에만 남는 것: " }), "원본 파일, 파일 카드, 경험 카드, 결과(master). 화면은 이 PC(localhost)에서만 열립니다."]),
+      el("li", {}, [el("strong", { text: "내 Claude로 보내는 것: " }), "주민번호·전화번호·계좌·카드·여권번호를 가린 본문 일부, 폴더 경로와 파일 이름 예시, 내 답변. 신분·금융 서류와 비밀번호·키 파일은 보내지 않습니다."]),
+      el("li", {}, [el("strong", { text: "사용량: " }), "분석은 내 Claude Code 구독을 씁니다. 한 번 실행할 때 5시간 사용량의 정한 비율(기본 Pro 기준 30%)에 닿으면 멈추고 다음 실행에서 이어 합니다."])
+    ])
+  ]));
+  return out;
+}
+function claudeView() {
+  var c = W.claude, chk = W.claudeChecking;
+  var out = stepHead("Claude Code 준비", "분석은 이 PC에 설치된 Claude Code(내 구독)로 합니다. 설치와 로그인을 확인합니다.");
+  var row = function (ok, label, detail) {
+    return el("li", { class: "chk is-" + (ok === null ? "warn" : ok ? "ok" : "fail") }, [
+      el("span", { class: "chk-m", "aria-hidden": "true", text: ok === null ? "…" : ok ? "✔" : "✘" }),
+      el("span", { class: "chk-l", text: label }), detail ? el("span", { class: "chk-f", text: detail }) : null]);
+  };
+  if (chk) out.push(el("p", { class: "waiting", role: "status" }, [el("span", { class: "spin", "aria-hidden": "true" }), "확인 중 · Claude에 짧은 연결 확인을 보냅니다(최대 1분)"]));
+  if (c) {
+    var inst = !!c.installed, okA = !!(c.agent && c.agent.ok);
+    out.push(el("ul", { class: "checks" }, [
+      row(inst, inst ? "Claude Code 설치됨 (" + c.installed + ")" : "Claude Code가 설치돼 있지 않습니다"),
+      row(inst ? okA : null, okA ? "로그인·연결 확인됨" : inst ? "연결 실패" : "설치 후 확인합니다", inst && !okA && c.agent ? (c.agent.kind === "auth" ? "로그인이 필요합니다" : c.agent.label) : null)
+    ]));
+    if (!inst) out.push(el("div", { class: "howto" }, [
+      el("h2", { text: "설치하기" }),
+      el("p", { text: OS_WIN ? "PowerShell을 열고 아래 명령을 실행하세요(공식 설치 안내: claude.com/claude-code)." : "터미널을 열고 아래 명령을 실행하세요(공식 설치 안내: claude.com/claude-code)." }),
+      el("pre", { class: "cmd", text: OS_WIN ? "irm https://claude.ai/install.ps1 | iex" : "curl -fsSL https://claude.ai/install.sh | bash" }),
+      el("p", { class: "lead small", text: "Node.js가 있으면 npm install -g @anthropic-ai/claude-code 로도 설치할 수 있습니다. 설치 후 [다시 확인]을 누르세요." })
+    ]));
+    else if (!okA) out.push(el("div", { class: "howto" }, [
+      el("h2", { text: "로그인하기" }),
+      el("p", { text: (OS_WIN ? "명령 프롬프트나 PowerShell" : "터미널") + "을 열고 claude 를 실행하면 브라우저에서 로그인 창이 열립니다. Claude Pro·Max 계정으로 로그인한 뒤 터미널 창은 닫아도 됩니다." }),
+      el("pre", { class: "cmd", text: "claude" }),
+      el("p", { class: "lead small", text: "로그인을 마쳤으면 [다시 확인]을 누르세요." })
+    ]));
+    else out.push(el("p", { class: "lead", text: "준비됐습니다. [다음]을 누르세요." }));
+  }
+  return out;
+}
+function preFoot() {
+  if (W.pre === "intro") return el("div", { class: "su-foot" }, [el("span", { class: "grow" }),
+    el("button", { type: "submit", class: "btn primary", "data-k": "w:begin", text: "시작하기" })]);
+  var ok = !!(W.claude && W.claude.agent && W.claude.agent.ok);
+  return el("div", { class: "su-foot" }, [
+    el("button", { type: "button", class: "btn", "data-k": "w:prev", onclick: function () { goPre("intro"); }, text: "이전" }),
+    el("button", { type: "button", class: "btn", "data-k": "w:recheckc", disabled: W.claudeChecking, onclick: checkClaude, text: "다시 확인" }),
+    el("span", { class: "grow" }),
+    ok ? null : el("button", { type: "button", class: "btn ghost", "data-k": "w:claudelater", disabled: W.claudeChecking,
+      title: "설정은 계속할 수 있지만, Claude Code가 준비되기 전에는 분석 작업이 멈춥니다",
+      onclick: function () { W.claudeSkipped = true; W.pre = null; goStep(1); }, text: "나중에" }),
+    el("button", { type: "submit", class: "btn primary", "data-k": "w:next", disabled: W.claudeChecking || !ok, text: "다음" })
+  ]);
+}
+
 function goStep(n) {
   W.step = n; W.errs = []; W.pickMsg = null;
   renderSetup(); focusStep();
   window.scrollTo(0, 0);
 }
 function focusStep() {
-  var f = W.step === 1 ? document.querySelector('[data-k="w:uni"]') : $("su-title");
+  var f = !W.pre && W.step === 1 ? document.querySelector('[data-k="w:uni"]') : $("su-title");
   if (f) f.focus({ preventScroll: true });
 }
 function wizFind() {
@@ -241,10 +321,12 @@ function wizNext() {
     if (e.length) { W.errs = e; renderSetup(); return; }
     goStep(W.step + 1); return;
   }
-  if (!W.saved) saveSetup(); else finishSetup();
+  if (!W.saved) saveSetup(); else finishSetup(true);
 }
 /** 폼 제출(Enter): 포커스한 입력칸에 따라 추가·찾기, 그 밖은 다음 (한글 조합 중 Enter가 제출로 이어져도 같은 결과) */
 function wizSubmit() {
+  if (W.pre === "intro") { goPre("claude"); return; }
+  if (W.pre === "claude") { if (W.claude && W.claude.agent && W.claude.agent.ok) { W.pre = null; goStep(1); } return; }
   var a = document.activeElement, k = a && a.getAttribute ? a.getAttribute("data-k") : null;
   if (k === "w:uni") wizFind();
   else if (k === "w:kwin") wizAddKw();
@@ -290,12 +372,16 @@ function postSetup(payload) {
     renderSetup();
   }, function () { W.busy = null; netErr(); renderSetup(); });
 }
-function finishSetup() {
+/** start: [첫 정리 시작]이면 메인 화면으로 간 뒤 [한 번에 정리]를 바로 시작한다(11.7) */
+function finishSetup(start) {
   W = null; S.setup = false; S.loading = true;
   clear($("setup")); $("setup").hidden = true; $("app").hidden = false;
   $("brand-sub").textContent = "로컬 편집 화면";
   render();
-  load().then(function () { toast("설정을 마쳤습니다. 아래 [새 자료 스캔]으로 자료를 찾아보세요"); var b = document.querySelector('[data-k="job:scan"]'); if (b) b.focus(); });
+  load().then(function () {
+    if (start) { startJob("all"); return; }
+    toast("설정을 마쳤습니다. 준비되면 아래 [한 번에 정리]를 누르세요"); var b = document.querySelector('[data-k="job:all"]'); if (b) b.focus();
+  });
 }
 
 function renderSetup() {
@@ -304,6 +390,13 @@ function renderSetup() {
     var R = clear($("setup"));
     var st = W.step;
     R.appendChild(el("header", { class: "su-head" }, [el("span", { class: "brand-name", text: "Master Record" }), el("span", { class: "brand-sub", text: "처음 설정" })]));
+    if (W.pre) {
+      var pb = W.pre === "intro" ? introView() : claudeView();
+      pb.push(errList(W.errs)); pb.push(preFoot());
+      R.appendChild(el("form", { class: "card su-card", novalidate: true, "aria-labelledby": "su-title",
+        onsubmit: function (ev) { ev.preventDefault(); wizSubmit(); } }, pb));
+      return;
+    }
     R.appendChild(el("ol", { class: "steps", "aria-label": "설정 단계" }, STEPS.map(function (s, i) {
       var n = i + 1, on = n === st, done = n < st || (n === 4 && W.saved);
       return el("li", { class: "st" + (on ? " on" : done ? " done" : ""), "aria-current": on ? "step" : null }, [
@@ -331,7 +424,8 @@ function wizFoot() {
   if (W.step === 4 && W.saved) return el("div", { class: "su-foot" }, [
     el("button", { type: "button", class: "btn", "data-k": "w:recheck", disabled: W.checking, onclick: function () { runCheck(W, renderSetup); }, text: "다시 점검" }),
     el("span", { class: "grow" }),
-    el("button", { type: "submit", class: "btn primary", "data-k": "w:start", text: "시작하기" })
+    el("button", { type: "button", class: "btn ghost", "data-k": "w:later", onclick: function () { finishSetup(false); }, text: "나중에 정리" }),
+    el("button", { type: "submit", class: "btn primary", "data-k": "w:start", text: "첫 정리 시작" })
   ]);
   return el("div", { class: "su-foot" }, [
     el("button", { type: "button", class: "btn", "data-k": "w:prev", disabled: W.step === 1 || b, onclick: wizPrev, text: "이전" }),
@@ -416,7 +510,7 @@ function step4() {
     out.push(el("dl", { class: "sum" }, [el("dt", { text: "결과 폴더" }), el("dd", { class: "mono", text: W.savedOut })]));
     out = out.concat(checkList(W));
     if (W.checks && !W.checking) out.push(el("p", { class: "lead small", style: "margin:12px 0 0",
-      text: W.checks.every(function (c) { return c.ok || c.warn; }) ? "준비됐습니다. [시작하기]를 누르세요." : "실패한 항목이 있어도 시작할 수 있습니다. 분석 작업 전에 해결하고 설정 화면에서 다시 점검하세요." }));
+      text: W.checks.every(function (c) { return c.ok || c.warn; }) ? "준비됐습니다. [첫 정리 시작]을 누르면 자료 찾기부터 Master Record까지 차례로 진행합니다(돌려 두고 다른 일을 해도 됩니다)." : "실패한 항목이 있어도 시작할 수 있습니다. 분석 작업 전에 해결하고 설정 화면에서 다시 점검하세요." }));
     return out;
   }
   var p = setupPayload(W);

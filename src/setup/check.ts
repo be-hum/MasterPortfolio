@@ -31,6 +31,16 @@ export async function probeAgent(config: Awaited<ReturnType<typeof loadConfig>>)
   } finally { await b.stop(); }
 }
 
+/** Claude Code CLI가 설치돼 있으면 버전 문자열, 없으면 null(처음 화면 11.7) */
+export async function claudeVersion(): Promise<string | null> {
+  try {
+    // Windows의 npm 설치본은 claude.cmd라 셸을 거친다(인자는 고정값만)
+    const { stdout } = await run("claude", ["--version"], { windowsHide: true, timeout: 15_000, shell: process.platform === "win32" });
+    const v = String(stdout).trim().split(/\r?\n/)[0];
+    return v || null;
+  } catch { return null; }
+}
+
 export type CheckItem = { ok: boolean; label: string; fix?: string; warn?: boolean };
 
 /** 환경 점검 결과를 항목 목록으로 돌려준다(mp doctor와 화면 설정이 함께 쓴다). 문구는 doctor 출력과 같다 */

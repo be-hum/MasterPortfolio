@@ -14,12 +14,12 @@ import { buildUiState, loadFileTitles } from "./model.js";
 import { suggestFolders, defaultOutputDir } from "../setup/folders.js";
 import { createSetupConfig, normalizeFolderInput, validateSetup, SetupError } from "../setup/config.js";
 import { pathKey } from "../core/paths.js";
-import { checkEnvironment, probeAgent, type AgentProbe } from "../setup/check.js";
+import { checkEnvironment, claudeVersion, probeAgent, type AgentProbe } from "../setup/check.js";
 import { pickFolder, PickUnavailable } from "../setup/pickFolder.js";
 import { expandUniversity } from "../discovery/universities.js";
 import { findDecisionKey, resetScopeDecisions, setScopeDecision } from "../discovery/scopeDecisions.js";
 import { isoNow } from "../store/cards.js";
-import { loadConfig, saveConfig } from "../config/config.js";
+import { defaultConfig, loadConfig, saveConfig } from "../config/config.js";
 import { killTree, spawnGroupOptions } from "./killTree.js";
 import { APP_ID, tokenId } from "./runtime.js";
 import { refreshMaster } from "../commands/master.js";
@@ -32,6 +32,8 @@ export type SetupDeps = {
   folderHints?: (keywords: string[]) => Promise<FolderHint[]>;
   /** master 자동 갱신(테스트 주입용) */
   refreshMaster?: (out: string) => Promise<void>;
+  /** Claude Code CLI 버전(없으면 null) */
+  claudeVersion?: () => Promise<string | null>;
   /** 에이전트(Claude) 연결·로그인 확인 */
   probe?: (config: Awaited<ReturnType<typeof loadConfig>>) => Promise<AgentProbe>;
 };
@@ -254,7 +256,7 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     }, o.masterDelayMs ?? 400);
   };
 
-  const SETUP_OPEN = new Set(["/api/setup", "/api/setup/suggest", "/api/pick-folder", "/api/check", "/api/shutdown"]);
+  const SETUP_OPEN = new Set(["/api/setup", "/api/setup/suggest", "/api/pick-folder", "/api/check", "/api/shutdown", "/api/claude-status"]);
   const busyErr = () => new HttpError(409, "작업 실행 중에는 수정할 수 없습니다. 끝난 뒤 다시 시도하세요.");
 
   async function settingsPost(b: Record<string, unknown>, dir: string) {
@@ -313,6 +315,15 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     if (path === "/api/folder-hints" && method === "GET") {
       const c = await loadConfig(cur());
       return send(res, 200, { ok: true, folders: newHints(await hints(c.university.keywords), c) });
+    }
+    // 처음 화면의 Claude Code 준비 단계(11.7): 설치(버전)와 연결·로그인(짧은 요청)을 함께 본다. 설치가 안 됐으면 연결 확인은 건너뜀
+    if (path === "/api/claude-status" && method === "GET") {
+      const version = await (sd.claudeVersion ?? claudeVersion)();
+      if (!version) return send(res, 200, { ok: true, installed: null, agent: { ok: false, kind: "missing", label: "Claude Code가 설치돼 있지 않습니다", fix: "" } });
+      const c = out ? await loadConfig(out) : defaultConfig({ university: { input: "", keywords: [] }, scanFolders: [], agent: "claude" });
+      const agent = await (sd.probe ?? probeAgent)(c).catch((e) => ({ ok: false as const, kind: "crash", label: e instanceof Error ? e.message : String(e), fix: "" }));
+      if (agent.ok) probeCache = Promise.resolve(agent);
+      return send(res, 200, { ok: true, installed: version, agent });
     }
     if (path === "/api/agent-status" && method === "GET") {
       const dir = cur();

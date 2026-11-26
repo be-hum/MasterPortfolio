@@ -112,6 +112,17 @@ describe("setup mode (11.6)", () => {
     expect((await loadConfig(out)).dismissedFolders).toEqual([w]);
   });
 
+  it("claude-status (setup mode): not installed → no probe; installed → probe result", async () => {
+    let probes = 0;
+    let ver: string | null = null;
+    const { call } = await boot(null, { claudeVersion: async () => ver, probe: async () => { probes++; return { ok: false, kind: "auth", label: "x", fix: "y" }; } });
+    expect((await call("GET", "/api/claude-status")).json).toMatchObject({ ok: true, installed: null, agent: { ok: false, kind: "missing" } });
+    expect(probes).toBe(0);
+    ver = "2.1.0 (Claude Code)";
+    expect((await call("GET", "/api/claude-status")).json).toMatchObject({ installed: "2.1.0 (Claude Code)", agent: { ok: false, kind: "auth" } });
+    expect(probes).toBe(1);
+  });
+
   it("check returns the injected result (null out in setup mode)", async () => {
     const items = [{ ok: true, label: "Node" }];
     let args: unknown[] = [];
