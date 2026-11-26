@@ -10,7 +10,8 @@ import { runGroup } from "./commands/group.js";
 import { runReview } from "./commands/review.js";
 import { runKeywords } from "./commands/keywords.js";
 import { refreshMaster, runMaster } from "./commands/master.js";
-import { runUi } from "./commands/ui.js";
+import { VERSION } from "./version.js";
+import { runServe, runUi } from "./commands/ui.js";
 import { runStart } from "./commands/start.js";
 
 function parseLimit(v: string): number {
@@ -27,7 +28,7 @@ function parseBudget(v: string): number {
 
 export function buildProgram(): Command {
   const program = new Command();
-  program.name("mp").description("MasterPortfolio: 이력서·포트폴리오 자료 인벤토리").version("0.3.1");
+  program.name("mp").description("MasterPortfolio: 이력서·포트폴리오 자료 인벤토리").version(VERSION);
   program.exitOverride();
   program.command("init").description("대학명·스캔 폴더·에이전트 설정")
     .option("--non-interactive").option("--university <name>").option("--folders <paths...>").option("--agent <name>").option("--output <dir>")
@@ -71,8 +72,11 @@ export function buildProgram(): Command {
   program.command("ui").description("브라우저에서 결과 보기·결정·답변·반영")
     .option("--port <n>", "포트(기본: 임의)", parseLimit).option("--no-open", "브라우저를 열지 않음")
     .action(async (o) => { process.exitCode = (await runUi({ port: o.port, open: o.open })).code; });
-  program.command("start").description("처음이면 설정 후, 브라우저 화면 열기(더블클릭 실행용)")
+  program.command("start").description("화면 서버를 뒤에서 띄우고(이미 실행 중이면 그대로) 브라우저로 열기(더블클릭 실행용)")
     .action(async () => { process.exitCode = await runStart(); });
+  // 내부용: 실행기(start)가 분리 프로세스로 띄우는 화면 서버(고정 포트 4317~4327, 고정 토큰)
+  program.command("serve", { hidden: true }).description("화면 서버(백그라운드용)")
+    .action(async () => { process.exitCode = await runServe(); });
   return program;
 }
 

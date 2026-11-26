@@ -55,14 +55,34 @@ describe("mp ui server (11.5)", () => {
     expect(good.json.job).toBeNull();
   });
 
-  it("serves the page only with the right t", async () => {
-    const { call } = await setup();
-    expect((await call("GET", "/?t=bad", undefined, {})).status).toBe(401);
-    expect((await call("GET", "/", undefined, {})).status).toBe(401);
-    const ok = await call("GET", `/?t=${TOKEN}`, undefined, {});
-    expect(ok.status).toBe(200);
-    expect(ok.text).toContain(TOKEN);
-    expect(ok.headers.get("cache-control")).toBe("no-store");
+  it("page: ?t= sets an HttpOnly SameSite cookie and redirects to a clean URL; / needs the cookie; APIs ignore the cookie", async () => {
+    const { srv } = await setup();
+    const base = `http://127.0.0.1:${srv.port}`;
+    const bad = await fetch(`${base}/?t=bad`, { redirect: "manual" });
+    expect(bad.status).toBe(401);
+    expect(await bad.text()).toContain("바로가기로 열어 주세요");
+    expect((await fetch(`${base}/`, { redirect: "manual" })).status).toBe(401);
+    const r = await fetch(`${base}/?t=${TOKEN}`, { redirect: "manual" });
+    expect(r.status).toBe(302);
+    expect(r.headers.get("location")).toBe("/");
+    const cookie = r.headers.get("set-cookie")!;
+    expect(cookie).toMatch(/^mp_t=[^;]+; HttpOnly; SameSite=Strict; Path=\/; Max-Age=\d+$/);
+    const page = await fetch(`${base}/`, { headers: { cookie: cookie.split(";")[0] } });
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain(TOKEN);
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    expect((await fetch(`${base}/`, { headers: { cookie: "mp_t=" + "0".repeat(64) } })).status).toBe(401);
+    // 쿠키만으로는 API를 부를 수 없다(헤더 필요)
+    expect((await fetch(`${base}/api/state`, { headers: { cookie: cookie.split(";")[0] } })).status).toBe(401);
+    expect((await fetch(`${base}/api/decide`, { method: "POST", headers: { cookie: cookie.split(";")[0], "content-type": "application/json" }, body: "{}" })).status).toBe(401);
+  });
+
+  it("ping answers without auth: app, version, token id (not the token), busy", async () => {
+    const { srv } = await setup();
+    const j = await (await fetch(`http://127.0.0.1:${srv.port}/api/ping`)).json();
+    expect(j).toMatchObject({ app: "MasterPortfolio", version: "dev", busy: false });
+    expect(j.id).toHaveLength(12);
+    expect(JSON.stringify(j)).not.toContain(TOKEN);
   });
 
   it("master.md·master.html are rebuilt automatically after a decision (debounced), so master is never stale", async () => {
@@ -303,6 +323,6 @@ describe("mp ui server (11.5)", () => {
     const r = await runUi({ open: false, cliPath: "unused.js" });
     closers.push(r.close!);
     expect(r.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?t=[0-9a-f]{64}$/);
-    expect((await fetch(r.url!)).status).toBe(200);
+    expect((await fetch(r.url!, { redirect: "manual" })).status).toBe(302);
   });
 });

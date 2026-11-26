@@ -21,6 +21,7 @@ import { findDecisionKey, resetScopeDecisions, setScopeDecision } from "../disco
 import { isoNow } from "../store/cards.js";
 import { loadConfig, saveConfig } from "../config/config.js";
 import { killTree, spawnGroupOptions } from "./killTree.js";
+import { APP_ID, tokenId } from "./runtime.js";
 import { refreshMaster } from "../commands/master.js";
 import { CHAIN, PROGRESS_PREFIX, SUMMARY_PREFIX, chainProgress, etaSeconds, overallProgress, type ProgressEvent } from "../core/progress.js";
 
@@ -42,7 +43,11 @@ async function defaultFolderHints(keywords: string[]): Promise<FolderHint[]> {
   return all.filter((f) => f.kind === "cloud" || f.kind === "drive" || f.kind === "wsl").map(({ path, label, kind }) => ({ path, label, kind }));
 }
 /** out이 null이면 설정 모드: 처음 설정 API만 열려 있다 */
-export type UiServerOptions = { out: string | null; port?: number; token: string; cliPath: string; html: (token: string) => string; onShutdown?: () => void; setupDeps?: SetupDeps; masterDelayMs?: number };
+export type UiServerOptions = { out: string | null; port?: number; token: string; cliPath: string; html: (token: string) => string; onShutdown?: () => void; setupDeps?: SetupDeps; masterDelayMs?: number;
+  /** 차례로 시도할 포트(사용 중이면 다음). 없으면 port 하나(또는 무작위) */
+  ports?: number[];
+  /** /api/ping이 알려 줄 버전(백그라운드 실행기의 같은 버전 확인용) */
+  version?: string };
 export type JobProgress = { stage: string; done: number; total: number; overall: number | null; etaSec: number | null };
 export type JobState = { kind: string; running: boolean; code: number | null; lines: string[]; progress: JobProgress | null;
   /** 완료 요약: 작업이 보낸 @@summary, 없으면 마지막 표준 출력 줄 */
@@ -51,6 +56,23 @@ export type JobState = { kind: string; running: boolean; code: number | null; li
   stopped: boolean;
   /** [한 번에 정리]: 지금 몇 번째 작업인지 */
   step: { index: number; count: number; kind: string } | null };
+
+const COOKIE = "mp_t";
+function cookieOf(req: IncomingMessage): string | null {
+  for (const part of (req.headers.cookie ?? "").split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === COOKIE) return v.join("=");
+  }
+  return null;
+}
+/** 쿠키가 없거나 틀린 브라우저: 바로가기로 다시 열라는 안내(HTML) */
+function sendLocked(res: ServerResponse) {
+  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MasterPortfolio</title>
+<style>body{margin:0;font:15px/1.6 system-ui,-apple-system,"Segoe UI","Malgun Gothic",sans-serif;background:#f5f7fb;color:#1b2333;display:grid;place-items:center;min-height:100vh}
+main{max-width:460px;margin:16px;padding:28px;background:#fff;border:1px solid #e3e8f0;border-radius:16px;box-shadow:0 8px 24px rgba(20,40,80,.06)}h1{font-size:19px;margin:0 0 8px}p{margin:8px 0;color:#4a5568}</style></head>
+<body><main><h1>MasterPortfolio를 바로가기로 열어 주세요</h1><p>이 브라우저는 아직 연결되지 않았습니다. 바탕 화면·시작 메뉴의 <b>MasterPortfolio</b>(또는 압축을 푼 폴더의 실행 파일)를 실행하면 이 브라우저에서 열리고, 그다음부터는 이 주소를 즐겨찾기로 바로 열 수 있습니다.</p></main></body></html>`;
+  return send(res, 401, html, "text/html; charset=utf-8");
+}
 
 const MAX_BODY = 1024 * 1024;
 const MAX_DRAIN = 64 * 1024 * 1024;
@@ -489,10 +511,18 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
       if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) throw new HttpError(403, "허용되지 않는 Host입니다.");
       const method = req.method ?? "GET";
       const rawPath = (req.url ?? "/").split("?")[0];
+      // 인증 없이 답하는 유일한 경로: 실행기가 "이미 도는 같은 설치·버전인가"를 확인한다(11.7)
+      if (rawPath === "/api/ping" && method === "GET") return send(res, 200, { app: APP_ID, version: o.version ?? "dev", id: tokenId(token), busy: !!job?.running });
       if (rawPath === "/" || rawPath === "/index.html") {
         if (method !== "GET") throw new HttpError(405, "허용되지 않는 메서드입니다.");
         const t = new URL(req.url ?? "/", "http://localhost").searchParams.get("t");
-        if (!sameToken(t, token)) throw new HttpError(401, "토큰이 올바르지 않습니다. `mp ui`가 출력한 주소로 접속하세요.");
+        // 주소의 토큰 → 쿠키로 바꾸고 깨끗한 주소로 이동(즐겨찾기 가능). 쿠키는 페이지를 여는 데만 쓰고, API는 페이지 안의 토큰 헤더로만 받는다
+        if (t !== null) {
+          if (!sameToken(t, token)) return sendLocked(res);
+          res.writeHead(302, { location: "/", "set-cookie": `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`, "cache-control": "no-store" });
+          return res.end();
+        }
+        if (!sameToken(cookieOf(req), token)) return sendLocked(res);
         return send(res, 200, o.html(token), "text/html; charset=utf-8");
       }
       if (rawPath.startsWith("/api/") || rawPath.startsWith("/files/")) {
@@ -509,7 +539,15 @@ export async function startUiServer(o: UiServerOptions): Promise<{ url: string; 
     });
   });
 
-  await new Promise<void>((ok, fail) => { server.once("error", fail); server.listen(o.port ?? 0, "127.0.0.1", ok); });
+  const tryPorts = o.ports?.length ? o.ports : [o.port ?? 0];
+  for (let i = 0; ; i++) {
+    try {
+      await new Promise<void>((ok, fail) => { server.once("error", fail); server.listen(tryPorts[i], "127.0.0.1", () => { server.off("error", fail); ok(); }); });
+      break;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE" || i + 1 >= tryPorts.length) throw e;
+    }
+  }
   port = (server.address() as AddressInfo).port;
   return {
     url: `http://127.0.0.1:${port}/?t=${token}`, port,

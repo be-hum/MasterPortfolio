@@ -18,6 +18,7 @@ foreach ($dir in $places) {
   $lnk = $ws.CreateShortcut((Join-Path $dir 'MasterPortfolio.lnk'))
   $lnk.TargetPath = Join-Path $dst 'MasterPortfolio.cmd'
   $lnk.WorkingDirectory = $dst
+  $lnk.WindowStyle = 7  # 최소화: 실행기는 서버를 뒤에 띄우고 바로 끝나므로 창이 거의 보이지 않게
   $lnk.IconLocation = (Join-Path $dst 'MasterPortfolio.ico') + ',0'
   $lnk.Description = '흩어진 자료에서 이력서·포트폴리오 경험을 찾아 정리'
   $lnk.Save()
