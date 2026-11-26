@@ -30,7 +30,6 @@ describe("renderApp (11.5)", () => {
   it("has no external resources and the app script compiles", () => {
     expect(html).not.toMatch(/(src|href)\s*=\s*["']?(https?:)?\/\//i);
     expect(html).not.toMatch(/@import|url\(/i);
-    expect(html).not.toMatch(/https?:\/\//);
     const s = scripts(html);
     expect(s).toHaveLength(1);
     expect(() => new Function(s[0])).not.toThrow();

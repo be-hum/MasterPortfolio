@@ -541,7 +541,7 @@ function openSettings() {
   ST = { data: null, err: null, form: null, base: null, pct: "", pathIn: "", sugg: null, suggBusy: false, scopeQ: "", confirm: null,
     checks: null, checking: false, saving: false, errs: [], picking: null, pickMsg: null, leave: false };
   S.settings = true; closeMenu();
-  $("app").inert = true; $("settings").hidden = false;
+  $("app").inert = true; $("topnav").inert = true; $("settings").hidden = false;
   renderSettings();
   fetchSettings(true, true);
 }
@@ -560,7 +560,7 @@ function closeSettings(force) {
   if (!ST) return;
   if (!force && setDirty()) { ST.leave = true; renderSettings(); var k = document.querySelector('[data-k="set:stay"]'); if (k) k.focus(); return; }
   ST = null; S.settings = false;
-  clear($("settings")); $("settings").hidden = true; $("app").inert = false;
+  clear($("settings")); $("settings").hidden = true; $("app").inert = false; $("topnav").inert = false;
   var b = document.querySelector('[data-k="settings"]');
   if (b && b.offsetParent) b.focus(); else if ($("q")) $("q").focus();
 }

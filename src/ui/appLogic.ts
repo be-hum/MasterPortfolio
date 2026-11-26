@@ -194,6 +194,28 @@ function setupPayload(w) {
     dismissed: w.folders.filter(function (f) { return HINT_KINDS.indexOf(f.kind) >= 0 && !f.checked; }).map(function (f) { return f.path; })
   };
 }
+/**
+ * 포트폴리오 완성도(11.7): 채택한 경험마다 기간·수행 방식·STAR 요약·경험 키워드 4항목을 채운 비율의 평균(0~100 정수).
+ * missing: 항목별로 비어 있는 채택 경험 수
+ */
+function completeness(exps) {
+  var ad = exps.filter(function (e) { return e.review === "adopted"; });
+  var missing = { period: 0, contribution: 0, star: 0, keywords: 0 };
+  if (!ad.length) return { pct: 0, adopted: 0, missing: missing };
+  var filled = 0;
+  ad.forEach(function (e) {
+    var have = { period: !!e.period, contribution: !!e.contribution, star: !!(e.star && (e.star.s || e.star.t || e.star.a || e.star.r)), keywords: !!(e.keywords && e.keywords.length) };
+    Object.keys(have).forEach(function (k) { if (have[k]) filled++; else missing[k]++; });
+  });
+  return { pct: Math.round(filled / (ad.length * 4) * 100), adopted: ad.length, missing: missing };
+}
+/** 주소의 해시 → 화면: #/ 홈, #/exp 경험, #/master 마스터, #/help 도움말. 그 밖(목차 앵커 #프로젝트 등)은 경험 */
+function routeOf(hash) {
+  var h = String(hash || "");
+  if (h === "" || h === "#" || h === "#/") return "home";
+  var m = /^#\/(exp|master|help)\b/.exec(h);
+  return m ? m[1] : "exp";
+}
 /** 예산 비율 % 입력 → 0.05~1 (숫자가 아니면 null) */
 function pctToShare(v) {
   var n = Number(String(v).trim());
@@ -226,6 +248,8 @@ function checkMark(it) { return it.ok ? "ok" : it.warn ? "warn" : "fail"; }
 export type Filter = { statuses: string[] | null; contribs: string[]; category: string | null; q: string; todo: "decide" | "answer" | "apply" | null };
 export type Group = { key: string; label: string; items: UiExperience[] };
 export interface AppLogic {
+  completeness(exps: Partial<UiExperience>[]): { pct: number; adopted: number; missing: { period: number; contribution: number; star: number; keywords: number } };
+  routeOf(hash: string): "home" | "exp" | "master" | "help";
   endOf(p: string | null): string;
   yearOf(p: string | null): string;
   inTodo(e: UiExperience, k: string): boolean;
@@ -255,7 +279,7 @@ export type WizFolder = { path: string; label: string; kind: string; checked: bo
 export type SettingsForm = { scanFolders: string[]; planScale: number; fiveHourShare: number; keywords: string };
 export type ScopeRow = { path: string; decision: string; by: string; at: string };
 const EXPORTS = ["endOf", "yearOf", "inTodo", "todoCounts", "matchText", "filterList", "groupList", "countBy", "chipsOf", "outMark", "oneLine", "starText", "splitList",
-  "folderKey", "addFolderTo", "mergeFolders", "groupFolders", "newSuggestions", "wizardErrors", "setupPayload", "pctToShare", "settingsDiff", "filterScope", "checkMark"];
+  "folderKey", "addFolderTo", "mergeFolders", "groupFolders", "newSuggestions", "wizardErrors", "setupPayload", "pctToShare", "settingsDiff", "filterScope", "checkMark", "completeness", "routeOf"];
 
 /** 테스트용: 브라우저에 넣는 문자열을 그대로 평가한다 */
 export function loadLogic(): AppLogic {

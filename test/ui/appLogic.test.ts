@@ -134,4 +134,17 @@ describe("setup & settings logic (11.6)", () => {
     expect(L.filterScope(rows, "PROJ").map((r) => r.path)).toEqual(["/z/proj"]);
     expect([L.checkMark({ ok: true }), L.checkMark({ ok: false, warn: true }), L.checkMark({ ok: false })]).toEqual(["ok", "warn", "fail"]);
   });
+
+  it("completeness: average of 4 fields over adopted experiences only", () => {
+    expect(L.completeness([])).toEqual({ pct: 0, adopted: 0, missing: { period: 0, contribution: 0, star: 0, keywords: 0 } });
+    const full = { review: "adopted", period: "2026-10", contribution: "직접 수행", star: { s: "s", t: "", a: "", r: "" }, keywords: ["x"] };
+    const half = { review: "adopted", period: null, contribution: "AI 주도", star: null, keywords: ["y"] };
+    const pending = { review: "pending", period: null, contribution: null, star: null, keywords: [] };
+    expect(L.completeness([full, half, pending] as any)).toEqual({ pct: 75, adopted: 2, missing: { period: 1, contribution: 0, star: 1, keywords: 0 } });
+  });
+
+  it("routeOf: hash → view; anchors fall back to the experience list", () => {
+    expect(["", "#", "#/"].map(L.routeOf)).toEqual(["home", "home", "home"]);
+    expect(["#/exp", "#/master", "#/help", "#/exp?x", "#프로젝트", "#/nope"].map(L.routeOf)).toEqual(["exp", "master", "help", "exp", "exp", "exp"]);
+  });
 });
