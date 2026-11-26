@@ -12,3 +12,11 @@ describe("cli", () => {
     expect(out.join("")).toContain("0.4.0");
   });
 });
+
+describe("version", () => {
+  it("src/version.ts matches package.json (used by mp --version and /api/ping)", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const { VERSION } = await import("../src/version.js");
+    expect(VERSION).toBe(JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version);
+  });
+});
